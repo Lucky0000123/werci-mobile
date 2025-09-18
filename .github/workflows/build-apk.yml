@@ -1,0 +1,70 @@
+name: Build Android APK (WERCI Mobile)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Capacitor Android build deps
+        run: |
+          npm install @capacitor/cli@5 @capacitor/android@5 @capacitor/core@5 --no-save
+
+      - name: Build web
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --warning-mode all
+
+      - name: Create timestamped APK name and set outputs
+        id: create_apk
+        run: |
+          TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+          APK_NAME="WERCI_INSPECTOR_${TIMESTAMP}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_NAME"
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          echo "apk_path=$(pwd)/$APK_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: werci-mobile-apk
+          path: ${{ steps.create_apk.outputs.apk_path }}
+          retention-days: 30
+
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.create_apk.outputs.apk_path }}
+          tag_name: v1.0-mobile-${{ github.run_number }}
+          name: WERCI Inspector - Mobile Build ${{ github.run_number }}
+          body: |
+            ✅ Fresh scaffold (React + Capacitor v5)
+            ✅ QR/KIMPER scanner via capacitor-community/barcode-scanner
+            ✅ Camera capture with JPEG compression
+            ✅ IndexedDB schema v1 (inspections/photos/queue)
+            ✅ Device-token auth stub and centralized API
+            ✅ Offline-first queueing for sync
+
