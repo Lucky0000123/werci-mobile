@@ -11,9 +11,24 @@ interface WerciDB extends DBSchema {
       createdAt: number
       updatedAt: number
       vehicleId: string
+      vehicleEquipNo?: string
+      inspectorName: string
+      inspectionDate: string
+      inspectionType: string
       status: 'FAILED' | 'MODERATE' | 'PASS'
-      stars: 1 | 2 | 3 | 4 | 5
+      overallStars: 1 | 2 | 3 | 4 | 5
       notes?: string
+      odometerReading?: number
+      // Individual category ratings
+      tireCondition: 1 | 2 | 3 | 4 | 5
+      brakeCondition: 1 | 2 | 3 | 4 | 5
+      lightsWorking: 1 | 2 | 3 | 4 | 5
+      engineCondition: 1 | 2 | 3 | 4 | 5
+      bodyCondition: 1 | 2 | 3 | 4 | 5
+      interiorCondition: 1 | 2 | 3 | 4 | 5
+      // GPS coordinates
+      gpsLatitude?: number
+      gpsLongitude?: number
       pendingSync?: boolean
     }
     indexes: { 'by-updatedAt': number }
@@ -23,7 +38,7 @@ interface WerciDB extends DBSchema {
     value: {
       id: string
       inspectionId: string
-      category: string
+      category: 'tire' | 'brake' | 'lights' | 'engine' | 'body' | 'interior' | 'general'
       mime: string
       dataURL: string // compressed image data
       compressionRatio?: number
