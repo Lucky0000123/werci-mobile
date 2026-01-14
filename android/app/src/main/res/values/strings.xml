@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">WERCI Inspector</string>
-    <string name="title_activity_main">WERCI Inspector</string>
-    <string name="package_name">com.werci.inspector</string>
-    <string name="custom_url_scheme">com.werci.inspector</string>
+    <string name="app_name">WERCK Inspector</string>
+    <string name="title_activity_main">WERCK Inspector</string>
+    <string name="package_name">com.werck.inspector</string>
+    <string name="custom_url_scheme">com.werck.inspector</string>
 </resources>

@@ -1,0 +1,41 @@
+.connection-status-chip {
+  transition: all 0.3s ease;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.connection-status-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.connection-status-chip:active {
+  transform: translateY(0);
+}
+
+/* Pulse animation for offline mode */
+.connection-status-chip[data-mode="offline"] {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Responsive design */
+@media (max-width: 480px) {
+  .connection-status-chip {
+    font-size: 11px;
+    padding: 3px 6px;
+    min-width: 70px;
+  }
+}

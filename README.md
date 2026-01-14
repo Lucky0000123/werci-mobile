@@ -1,4 +1,75 @@
-# React + TypeScript + Vite
+# WERCI Mobile App - Fleet Inspection
+
+## 📱 Technology Stack
+
+**NOT React Native** - This is a **React + TypeScript + Capacitor** application:
+
+- **React 18** - Modern React with hooks
+- **TypeScript** - Type-safe development
+- **Vite** - Fast build tooling and HMR
+- **Capacitor** - Native wrapper for Android/iOS deployment
+- **Ionic Components** - Mobile-optimized UI components
+
+### Why Capacitor (not React Native)?
+
+Capacitor wraps a **web application** (React) into a native container, allowing:
+- ✅ Single codebase for web and mobile
+- ✅ Access to native device APIs (camera, storage, network)
+- ✅ Faster development with web technologies
+- ✅ Easy deployment to Android/iOS
+
+## 🚀 Quick Start
+
+### Development Server
+
+```bash
+npm install
+npm run dev
+```
+
+### Build for Production
+
+```bash
+npm run build
+```
+
+### Build Android APK
+
+```bash
+# Sync web assets to Capacitor
+npx cap sync android
+
+# Build APK
+cd android
+./gradlew assembleRelease
+```
+
+## 📁 Project Structure
+
+```
+werci-mobile/
+├── src/
+│   ├── components/     # React components
+│   ├── features/       # Feature modules
+│   ├── services/       # API clients
+│   └── tests/          # Unit tests
+├── android/            # Capacitor Android project
+├── capacitor.config.ts # Capacitor configuration
+├── vite.config.ts      # Vite build config
+└── package.json        # Dependencies
+```
+
+## 🔌 Backend Connection
+
+The mobile app connects to the Flask backend API:
+
+- **Company WiFi**: `http://10.40.21.184:8082/api`
+- **Mobile Network**: `https://159.65.13.232/api`
+- **Offline Mode**: Local IndexedDB cache
+
+Network detection is automatic with intelligent failover.
+
+## 📖 Original Vite Template Info
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

@@ -1,0 +1,202 @@
+/* Diagnostics Panel - Dark Theme */
+.diagnostics-panel {
+  padding: 0;
+  background: #0d1117;
+  min-height: 100vh;
+}
+
+.diagnostics-container {
+  padding: 16px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  margin: 16px;
+}
+
+.diagnostics-header {
+  margin: 0 0 12px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #c9d1d9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostics-description {
+  margin: 0 0 16px 0;
+  color: #8b949e;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.diagnostics-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.diagnostics-button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: #c9d1d9;
+}
+
+.diagnostics-button.primary {
+  background: linear-gradient(135deg, #238636 0%, #2ea043 100%);
+  border-color: #2ea043;
+  color: #ffffff;
+}
+
+.diagnostics-button.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2ea043 0%, #3fb950 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(46, 160, 67, 0.3);
+}
+
+.diagnostics-button.secondary:hover:not(:disabled) {
+  background: #30363d;
+  border-color: #484f58;
+}
+
+.diagnostics-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.diagnostics-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.active-endpoint {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.active-endpoint strong {
+  color: #c9d1d9;
+  font-weight: 600;
+}
+
+.diagnostics-table {
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #161b22;
+}
+
+.table-header {
+  display: grid;
+  grid-template-columns: 1.2fr 1.6fr 0.6fr 0.6fr 1.6fr;
+  background: #21262d;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 12px;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #30363d;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.6fr 0.6fr 0.6fr 1.6fr;
+  padding: 10px 12px;
+  border-top: 1px solid #21262d;
+  font-size: 13px;
+  color: #c9d1d9;
+  transition: background 0.2s ease;
+}
+
+.table-row:hover {
+  background: #0d1117;
+}
+
+.table-cell {
+  display: flex;
+  align-items: center;
+  word-break: break-word;
+}
+
+.status-success {
+  color: #3fb950;
+  font-weight: 600;
+}
+
+.status-fail {
+  color: #f85149;
+  font-weight: 600;
+}
+
+.diagnostics-notes {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.3);
+  border-radius: 8px;
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .table-header,
+  .table-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .table-header > div,
+  .table-row > div {
+    padding: 4px 0;
+  }
+  
+  .table-header > div::before,
+  .table-row > div::before {
+    content: attr(data-label);
+    font-weight: 600;
+    margin-right: 8px;
+    color: #8b949e;
+  }
+}
+
+/* Loading State */
+.diagnostics-button.loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.diagnostics-button.loading::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 50%;
+  left: 50%;
+  margin-left: -8px;
+  margin-top: -8px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

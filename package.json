@@ -1,30 +1,47 @@
 {
-  "name": "werci-mobile",
+  "name": "wbnkis-mobile",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:prod": "tsc -b && vite build --mode production",
+    "build:apk": "npm run build:prod && npx cap sync android && npx cap build android",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "lint:fix": "eslint . --fix",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "preview": "vite preview",
+    "android:dev": "npm run build && npx cap sync android && npx cap open android",
+    "android:build": "npm run build:prod && npx cap sync android",
+    "android:run": "npm run android:build && npx cap run android",
+    "sync": "npx cap sync",
+    "check-env": "node -e \"console.log('Environment check:'); console.log('VITE_CLOUD_BASE:', process.env.VITE_CLOUD_BASE); console.log('VITE_LOCAL_BASE:', process.env.VITE_LOCAL_BASE);\""
   },
   "dependencies": {
     "@capacitor-community/barcode-scanner": "^4.0.1",
     "@capacitor/android": "^5.7.8",
     "@capacitor/app": "^5.0.8",
     "@capacitor/camera": "^5.0.10",
-    "@capacitor/cli": "^5.7.8",
     "@capacitor/core": "^5.7.8",
     "@capacitor/device": "^5.0.8",
     "@capacitor/network": "^5.0.8",
     "@capacitor/preferences": "^5.0.8",
+    "@ionic/pwa-elements": "^3.3.0",
+    "@zxing/library": "^0.21.3",
+    "esbuild": "^0.25.12",
     "idb": "^8.0.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^5.7.8",
     "@eslint/js": "^9.35.0",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",
@@ -32,8 +49,10 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.4.0",
+    "jsdom": "^23.2.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.43.0",
-    "vite": "^7.1.6"
+    "vite": "^7.1.6",
+    "vitest": "^1.6.1"
   }
 }

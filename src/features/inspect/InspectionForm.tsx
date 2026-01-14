@@ -1,55 +1,118 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import type { FormEvent } from 'react'
 import { Camera, CameraResultType } from '@capacitor/camera'
+import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
 import { compressDataUrl } from '../../services/compress'
-import { addPhoto, enqueue, setInspection } from '../../services/db'
+import { sqlServerService, type Inspection } from '../../services/sqlserver'
+import { apiFetch } from '../../services/api'
+import offlineStorage from '../../services/offlineStorage'
+import { offlineDataSync } from '../../services/offlineDataSync'
+import { setInspection, addPhoto as addPhotoLocal, enqueue } from '../../services/db'
+import './InspectionFormProfessional.css'
 
 function statusFromStars(stars: number): 'FAILED' | 'MODERATE' | 'PASS' {
   if (stars <= 2) return 'FAILED'
-  if (stars === 3) return 'MODERATE'
-  return 'PASS'
+  if (stars === 3) return 'MODERATE'  // Moderate condition = pending further review
+  return 'PASS'  // 4-5 stars = completed/passed
 }
 
-function calculateOverallRating(ratings: Record<string, number>): number {
-  const values = Object.values(ratings)
-  return Math.round(values.reduce((sum, val) => sum + val, 0) / values.length)
+interface InspectionFormProps {
+  scannedVehicle?: {
+    equip_no: string
+    description?: string
+    company?: string
+    manufacturer?: string
+    unit_model?: string
+    commissioning_status?: string
+    expired_date?: string
+  } | null
 }
 
-type InspectionCategory = 'tire' | 'brake' | 'lights' | 'engine' | 'body' | 'interior'
-
-interface CategoryPhoto {
-  id: string
-  preview: string
-  ratio: number
-  category: InspectionCategory
-}
-
-export default function InspectionForm() {
-  // Basic form data
-  const [vehicleId, setVehicleId] = useState('')
-  const [vehicleEquipNo, setVehicleEquipNo] = useState('')
+export default function InspectionForm({ scannedVehicle }: InspectionFormProps = {}) {
+  // Form data matching original Bootstrap template
   const [inspectorName, setInspectorName] = useState('')
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0])
-  const [odometerReading, setOdometerReading] = useState('')
+  const [brakeCondition, setBrakeCondition] = useState('')
+  const [tireCondition, setTireCondition] = useState('')
+  const [engineCondition, setEngineCondition] = useState('')
+  const [bodyCondition, setBodyCondition] = useState('')
+  const [interiorCondition, setInteriorCondition] = useState('')
+  const [lightsWorking, setLightsWorking] = useState('')
   const [notes, setNotes] = useState('')
+  const [odometerReading, setOdometerReading] = useState('')
+  const [overallCondition, setOverallCondition] = useState('')
+  const [createServiceRequest, setCreateServiceRequest] = useState(false)
 
-  // Category ratings
-  const [ratings, setRatings] = useState({
-    tire: 3,
-    brake: 3,
-    lights: 3,
-    engine: 3,
-    body: 3,
-    interior: 3
-  })
+  // QR Code and Equipment Identification
+  const [equipmentNumber, setEquipmentNumber] = useState('')
+  const [vehicleDetails, setVehicleDetails] = useState<any>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
+  const [photos, setPhotos] = useState<{ id: string; preview: string; ratio: number }[]>([])
+  const [gpsLatitude, setGpsLatitude] = useState<number | null>(null)
+  const [gpsLongitude, setGpsLongitude] = useState<number | null>(null)
+  const [locationName, setLocationName] = useState('') // Reserved for future GPS location feature
 
-  // Photos by category
-  const [photos, setPhotos] = useState<CategoryPhoto[]>([])
+  // KIMPER-specific state
+  const [kimperDetails, setKimperDetails] = useState<any>(null)
+  const [isKimperScan, setIsKimperScan] = useState(false)
 
-  // Overall rating (calculated)
-  const overallRating = calculateOverallRating(ratings)
-  const overallStatus = statusFromStars(overallRating)
+  // Auto-populate equipment number from scanned vehicle
+  useEffect(() => {
+    if (scannedVehicle?.equip_no) {
+      console.log('📋 Auto-populating equipment number from QR scan:', scannedVehicle.equip_no)
+      setEquipmentNumber(scannedVehicle.equip_no)
+      setVehicleDetails(scannedVehicle)
+    }
+  }, [scannedVehicle])
 
-  async function capturePhoto(category: InspectionCategory) {
+  // Ensure form starts at the top when component mounts
+  useEffect(() => {
+    // Multiple approaches to ensure we start at the top
+    const scrollToTop = () => {
+      // Scroll window to top
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+
+      // Scroll any scrollable containers to top
+      const containers = [
+        document.querySelector('.professional-inspection-form'),
+        document.querySelector('.werci-container'),
+        document.body,
+        document.documentElement
+      ]
+
+      containers.forEach(container => {
+        if (container) {
+          container.scrollTop = 0
+        }
+      })
+    }
+
+    // Execute immediately
+    scrollToTop()
+
+    // Also execute after a short delay to handle any async rendering
+    const timeoutId = setTimeout(scrollToTop, 100)
+
+    return () => clearTimeout(timeoutId)
+  }, [])
+
+  // Calculate star rating based on conditions
+  const calculateStarRating = () => {
+    if (!overallCondition) return 0
+
+    switch (overallCondition) {
+      case 'excellent': return 5
+      case 'good': return 4
+      case 'fair': return 3
+      case 'poor': return 2
+      case 'critical': return 1
+      default: return 0
+    }
+  }
+
+  // Photo capture
+  async function addPhoto() {
     try {
       const img = await Camera.getPhoto({
         resultType: CameraResultType.DataUrl,
@@ -59,12 +122,12 @@ export default function InspectionForm() {
       if (!img.dataUrl) return
 
       const { dataUrl, compressionRatio } = await compressDataUrl(img.dataUrl, 0.75)
-      const newPhoto: CategoryPhoto = {
+      const newPhoto = {
         id: crypto.randomUUID(),
         preview: dataUrl,
-        ratio: compressionRatio,
-        category
+        ratio: compressionRatio
       }
+
       setPhotos(prev => [...prev, newPhoto])
     } catch (error) {
       console.error('Camera error:', error)
@@ -72,469 +135,892 @@ export default function InspectionForm() {
     }
   }
 
-  async function submit() {
-    // Validation
-    if (!vehicleId.trim()) {
-      alert('Please enter a Vehicle ID')
+  const removePhoto = (photoId: string) => {
+    setPhotos(prev => prev.filter(p => p.id !== photoId))
+  }
+
+  // GPS Location capture
+  async function getCurrentLocation() {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by this browser.')
       return
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGpsLatitude(position.coords.latitude)
+        setGpsLongitude(position.coords.longitude)
+        setLocationName(`${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`)
+      },
+      (error) => {
+        console.error('Location error:', error)
+        alert('Unable to get location. Please check permissions.')
+      }
+    )
+  }
+
+
+
+  async function scanQRCode() {
+    try {
+      setIsScanning(true)
+      setScanError('')
+
+      // Check camera permission
+      const status = await BarcodeScanner.checkPermission({ force: true })
+      if (!status.granted) {
+        setScanError('Camera permission denied')
+        setIsScanning(false)
+        return
+      }
+
+      // Hide background and start scanning
+      await BarcodeScanner.hideBackground()
+      document.body.classList.add('qr-scanning')
+
+      const result = await BarcodeScanner.startScan()
+
+      // Cleanup
+      document.body.classList.remove('qr-scanning')
+      await BarcodeScanner.showBackground()
+      setIsScanning(false)
+
+      if (result.hasContent && result.content) {
+        console.log('🔍 QR Code scanned:', result.content)
+        await processQRCode(result.content)
+      }
+    } catch (error) {
+      console.error('❌ QR scan error:', error)
+      setScanError('QR scan failed: ' + (error as Error).message)
+      setIsScanning(false)
+      document.body.classList.remove('qr-scanning')
+      await BarcodeScanner.showBackground()
+    }
+  }
+
+  async function processQRCode(qrContent: string) {
+    try {
+      console.log('🔍 QR Code scanned:', qrContent)
+
+      // Handle KIMPER QR codes: http://10.40.21.184:8082/kimper/qr/12918
+      if (qrContent.includes('/kimper/qr/')) {
+        console.log('👤 KIMPER QR code detected')
+        const parts = qrContent.split('/kimper/qr/')
+        if (parts.length > 1) {
+          const kimperId = parts[1].split('?')[0].split('#')[0] // Remove query params
+          console.log('👤 KIMPER ID:', kimperId)
+          setIsKimperScan(true)
+          await lookupKimperDetails(kimperId)
+          return
+        }
+      }
+
+      // Handle Equipment/Vehicle QR codes
+      setIsKimperScan(false)
+      let equipNo = qrContent
+
+      // Handle different QR code formats
+      if (qrContent.startsWith('EQUIP:')) {
+        equipNo = qrContent.replace('EQUIP:', '')
+      } else if (qrContent.includes('/inspect/')) {
+        // Handle URL format: http://domain/inspect/EQUIP123
+        const parts = qrContent.split('/inspect/')
+        if (parts.length > 1) {
+          equipNo = parts[1]
+        }
+      }
+
+      console.log('🔍 Processing equipment number:', equipNo)
+      setEquipmentNumber(equipNo)
+
+      // Look up vehicle details from database
+      await lookupVehicleDetails(equipNo)
+
+    } catch (error) {
+      console.error('❌ QR processing error:', error)
+      setScanError('Failed to process QR code')
+    }
+  }
+
+  async function lookupKimperDetails(kimperId: string) {
+    try {
+      console.log('👤 Looking up KIMPER details for ID:', kimperId)
+      setScanError('')
+
+      // Try to fetch KIMPER data from server
+      const response = await apiFetch(`/kimper/qr/${kimperId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (response.ok) {
+        // Check if it's HTML (web view) or JSON (API response)
+        const contentType = response.headers.get('content-type')
+
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json()
+          console.log('✅ KIMPER data (JSON):', data)
+          setKimperDetails(data)
+
+          // Auto-fill inspector name from KIMPER data
+          if (data.name) {
+            setInspectorName(data.name)
+            console.log('✅ Inspector name set to:', data.name)
+          }
+
+          setScanError('')
+        } else {
+          // HTML response - parse it to extract KIMPER data
+          const html = await response.text()
+          console.log('📄 KIMPER HTML response received')
+
+          // Try to extract KIMPER name from HTML
+          const nameMatch = html.match(/<h2[^>]*>([^<]+)<\/h2>/)
+          if (nameMatch && nameMatch[1]) {
+            const kimperName = nameMatch[1].trim()
+            setInspectorName(kimperName)
+            setKimperDetails({ name: kimperName, id: kimperId })
+            console.log('✅ KIMPER name extracted from HTML:', kimperName)
+            setScanError('')
+          } else {
+            setScanError('KIMPER data found but could not extract name')
+          }
+        }
+      } else {
+        console.error('❌ KIMPER lookup failed:', response.status)
+        setScanError(`KIMPER not found (ID: ${kimperId})`)
+      }
+
+    } catch (error) {
+      console.error('❌ KIMPER lookup error:', error)
+      setScanError('Failed to load KIMPER data. Check network connection.')
+    }
+  }
+
+  async function lookupVehicleDetails(equipNo: string) {
+    try {
+      const normalized = (equipNo || '').toUpperCase().trim()
+      console.log('🔍 Looking up vehicle details for:', normalized)
+
+      // 1) Try offline sync data first (WhatsApp-like instant access)
+      const offlineVehicle = await offlineDataSync.lookupVehicleOffline(normalized)
+      if (offlineVehicle) {
+        console.log('📦 Using offline synced vehicle data')
+        setVehicleDetails({
+          make: offlineVehicle.manufacturer || 'Unknown',
+          model: offlineVehicle.unit_model || 'Unknown',
+          equip_no: offlineVehicle.equip_no,
+          description: offlineVehicle.description,
+          company: offlineVehicle.company,
+          commissioning_status: offlineVehicle.commissioning_status,
+          expired_date: offlineVehicle.expired_date
+        })
+        setScanError('')
+        if (offlineVehicle.description) {
+          setNotes(`Equipment: ${offlineVehicle.description} (${offlineVehicle.equip_no})`)
+        }
+        return
+      }
+
+      // 2) Fallback to legacy offline cache
+      const cached = await offlineStorage.getVehicleByEquipNo(normalized)
+      if (cached) {
+        console.log('📦 Using legacy offline cached vehicle')
+        setVehicleDetails(cached)
+        setScanError('')
+        if (cached.description) {
+          setNotes(`Equipment: ${cached.description} (${cached.equip_no})`)
+        }
+        return
+      }
+
+      // 3) Use centralized API with intelligent failover (cloud/local/dev)
+      const response = await apiFetch(`/api/mobile/vehicles/qr/${encodeURIComponent(normalized)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.vehicle) {
+          console.log('✅ Vehicle found:', data.vehicle)
+          setVehicleDetails(data.vehicle)
+          setScanError('')
+
+          if (data.vehicle.description) {
+            setNotes(`Equipment: ${data.vehicle.description} (${data.vehicle.equip_no})`)
+          }
+        } else {
+          console.warn('⚠️ Vehicle not found in lookup response:', (data && data.message) || normalized)
+          setVehicleDetails(null)
+          setScanError('')
+        }
+      } else {
+        if (response.status === 404) {
+          console.warn('⚠️ Equipment not found (404):', normalized)
+          setVehicleDetails(null)
+          setScanError('')
+          return
+        }
+        console.error('❌ API request failed:', response.status)
+        setScanError('Failed to lookup equipment details')
+        setVehicleDetails(null)
+      }
+    } catch (error) {
+      console.error('❌ Vehicle lookup error:', error)
+      setScanError('Network error during equipment lookup')
+      setVehicleDetails(null)
+    }
+  }
+
+
+
+  async function submit() {
+    // Validation
     if (!inspectorName.trim()) {
       alert('Please enter Inspector Name')
       return
     }
-
-    const id = crypto.randomUUID()
-    await setInspection({
-      id,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      vehicleId: vehicleId.trim(),
-      vehicleEquipNo: vehicleEquipNo.trim(),
-      inspectorName: inspectorName.trim(),
-      inspectionDate,
-      inspectionType: 'Mobile Inspection',
-      status: overallStatus,
-      overallStars: overallRating as 1 | 2 | 3 | 4 | 5,
-      notes: notes.trim(),
-      odometerReading: odometerReading ? parseInt(odometerReading) : undefined,
-      tireCondition: ratings.tire as 1 | 2 | 3 | 4 | 5,
-      brakeCondition: ratings.brake as 1 | 2 | 3 | 4 | 5,
-      lightsWorking: ratings.lights as 1 | 2 | 3 | 4 | 5,
-      engineCondition: ratings.engine as 1 | 2 | 3 | 4 | 5,
-      bodyCondition: ratings.body as 1 | 2 | 3 | 4 | 5,
-      interiorCondition: ratings.interior as 1 | 2 | 3 | 4 | 5,
-      pendingSync: true,
-    })
-    await enqueue({ kind: 'inspection', refId: id, priority: 1 })
-
-    // Save photos to DB and enqueue
-    for (const photo of photos) {
-      await addPhoto({
-        id: photo.id,
-        inspectionId: id,
-        category: photo.category,
-        mime: 'image/jpeg',
-        dataURL: photo.preview,
-        compressionRatio: photo.ratio,
-        createdAt: Date.now(),
-        pendingSync: true,
-      })
-      await enqueue({ kind: 'photo', refId: photo.id, priority: 3 })
+    if (!overallCondition) {
+      alert('Please select Overall Vehicle Condition')
+      return
     }
 
-    alert(`✅ Inspection saved successfully!\n\nVehicle: ${vehicleId}\nRating: ${overallRating}/5 stars\nStatus: ${overallStatus}\nPhotos: ${photos.length}`)
+    try {
+      // Calculate star rating from overall condition
+      const getStarRating = (condition: string): number => {
+        switch (condition) {
+          case 'excellent': return 5
+          case 'good': return 4
+          case 'fair': return 3
+          case 'poor': return 2
+          case 'critical': return 1
+          default: return 0
+        }
+      }
 
-    // Reset form
-    setVehicleId('')
-    setVehicleEquipNo('')
-    setInspectorName('')
-    setInspectionDate(new Date().toISOString().split('T')[0])
-    setOdometerReading('')
-    setNotes('')
-    setRatings({ tire: 3, brake: 3, lights: 3, engine: 3, body: 3, interior: 3 })
-    setPhotos([])
+      const starRating = getStarRating(overallCondition)
+      const status = statusFromStars(starRating)
+
+      // Create inspection object for SQL Server
+      const inspection: Inspection = {
+        vehicle_equip_no: equipmentNumber || 'MOBILE_SCAN',
+        inspection_date: inspectionDate,
+        inspector_name: inspectorName.trim(),
+        inspection_type: 'Mobile Vehicle Inspection',
+        status: status,
+        notes: notes,
+        odometer_reading: odometerReading ? parseInt(odometerReading) : undefined,
+        tire_condition: tireCondition,
+        brake_condition: brakeCondition,
+        lights_working: lightsWorking === 'yes',
+        engine_condition: engineCondition,
+        body_condition: bodyCondition,
+        interior_condition: interiorCondition,
+        star_rating: starRating,
+        gps_latitude: gpsLatitude || undefined,
+        gps_longitude: gpsLongitude || undefined
+      }
+
+      // Save directly to SQL Server via web app API
+      console.log('📤 Submitting inspection to SQL Server...')
+      const inspectionId = await sqlServerService.createInspection(inspection)
+
+      if (inspectionId) {
+        console.log('✅ Inspection saved with ID:', inspectionId)
+
+        // Upload photos
+        let totalPhotos = 0
+        if (photos.length > 0) {
+          console.log(`📸 Uploading ${photos.length} photos...`)
+          for (const photo of photos) {
+            try {
+              // Convert data URL to blob
+              const response = await fetch(photo.preview)
+              const blob = await response.blob()
+
+              const success = await sqlServerService.uploadPhoto(inspectionId, blob, 'general')
+              if (success) {
+                console.log('✅ Photo uploaded successfully')
+                totalPhotos++
+              } else {
+                console.warn('⚠️ Photo upload failed')
+              }
+            } catch (photoError) {
+              console.error('❌ Photo upload error:', photoError)
+            }
+          }
+        }
+
+        alert(`✅ Inspection saved to database!\n\nOverall Rating: ${starRating}/5 stars (${overallCondition})\nStatus: ${status}\nPhotos: ${totalPhotos}`)
+        resetForm()
+      } else {
+        throw new Error('Failed to save inspection')
+      }
+
+    } catch (error) {
+      console.warn('📴 Online submit failed, queueing offline:', error)
+
+      // Offline-first fallback: persist to IndexedDB and enqueue for background sync
+      const localId = crypto.randomUUID()
+      const starRating = ((): number => {
+        switch (overallCondition) {
+          case 'excellent': return 5
+          case 'good': return 4
+          case 'fair': return 3
+          case 'poor': return 2
+          case 'critical': return 1
+          default: return 0
+        }
+      })()
+
+      await setInspection({
+        id: localId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        vehicleId: equipmentNumber || 'MOBILE_SCAN', // Use equipment number as vehicle ID
+        vehicleEquipNo: equipmentNumber || 'MOBILE_SCAN',
+        inspectorName: inspectorName.trim(),
+        inspectionDate: inspectionDate,
+        inspectionType: 'Mobile Vehicle Inspection',
+        status: statusFromStars(starRating),
+        overallStars: (starRating || 0) as 1|2|3|4|5,
+        notes: notes || undefined,
+        odometerReading: odometerReading ? parseInt(odometerReading) : undefined,
+        tireCondition: tireCondition,
+        brakeCondition: brakeCondition,
+        lightsWorking: lightsWorking || 'no',
+        engineCondition: engineCondition,
+        bodyExteriorCondition: bodyCondition,
+        bodyInteriorCondition: interiorCondition,
+        gpsLatitude: gpsLatitude || undefined,
+        gpsLongitude: gpsLongitude || undefined,
+        pendingSync: true
+      })
+
+      // Persist photos locally and enqueue them
+      for (const p of photos) {
+        const photoId = crypto.randomUUID()
+        await addPhotoLocal({
+          id: photoId,
+          inspectionId: localId,
+          category: 'general',
+          mime: 'image/jpeg',
+          dataURL: p.preview,
+          compressionRatio: p.ratio,
+          createdAt: Date.now(),
+          pendingSync: true
+        })
+        await enqueue({ kind: 'photo', refId: photoId, priority: 2 })
+      }
+
+      // Enqueue the inspection itself
+      await enqueue({ kind: 'inspection', refId: localId, priority: 1 })
+
+      alert('✅ Saved offline. Your inspection will auto-sync when back online.')
+      resetForm()
+    }
   }
 
-  const inspectionCategories = [
-    { key: 'tire' as const, label: 'Tire Condition', icon: '🛞' },
-    { key: 'brake' as const, label: 'Brake System', icon: '🛑' },
-    { key: 'lights' as const, label: 'Lights & Signals', icon: '💡' },
-    { key: 'engine' as const, label: 'Engine Condition', icon: '⚙️' },
-    { key: 'body' as const, label: 'Body Condition', icon: '🚗' },
-    { key: 'interior' as const, label: 'Interior Condition', icon: '🪑' }
-  ]
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    submit()
+  }
 
-  const StarRating = ({ value, onChange }: { value: number, onChange: (rating: number) => void }) => (
-    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', margin: '8px 0' }}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <button
-          key={star}
-          onClick={() => onChange(star)}
-          style={{
-            background: 'none',
-            border: 'none',
-            fontSize: '24px',
-            cursor: 'pointer',
-            color: star <= value ? '#FFD700' : '#DDD',
-            padding: '4px'
-          }}
-        >
-          ⭐
-        </button>
-      ))}
-      <span style={{
-        marginLeft: '8px',
-        fontSize: '14px',
-        color: value <= 2 ? '#e74c3c' : value === 3 ? '#f39c12' : '#27ae60',
-        fontWeight: 'bold'
-      }}>
-        {value <= 2 ? 'Poor' : value === 3 ? 'Fair' : value === 4 ? 'Good' : 'Excellent'}
-      </span>
-    </div>
-  )
+  function resetForm() {
+    setInspectorName('')
+    setInspectionDate(new Date().toISOString().split('T')[0])
+    setBrakeCondition('')
+    setTireCondition('')
+    setEngineCondition('')
+    setBodyCondition('')
+    setInteriorCondition('')
+    setLightsWorking('')
+    setOverallCondition('')
+    setNotes('')
+    setOdometerReading('')
+    setCreateServiceRequest(false)
+    setPhotos([])
+    setGpsLatitude(null)
+    setGpsLongitude(null)
+    setLocationName('')
+    setEquipmentNumber('')
+    setVehicleDetails(null)
+    setScanError('')
+    setIsScanning(false)
+  }
 
   return (
-    <div style={{
-      padding: '16px',
-      maxWidth: '600px',
-      margin: '0 auto',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
-      {/* Header */}
-      <div style={{
-        background: 'linear-gradient(135deg, #2E7D32, #4CAF50)',
-        color: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        textAlign: 'center'
-      }}>
-        <h2 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>🔍 WERCI Mobile Inspection</h2>
-        <div style={{ fontSize: '16px', opacity: 0.9 }}>
-          Overall Rating: {overallRating}/5 ⭐ | Status: <strong>{overallStatus}</strong>
+    <div className="professional-inspection-form">
+      {/* Mobile Header */}
+      <div className="mobile-header">
+        <div className="container">
+          <h1 className="text-center mb-0">
+            <i className="fas fa-clipboard-check me-2"></i>
+            Mobile Vehicle Inspection
+          </h1>
         </div>
       </div>
 
-      {/* Inspector Information */}
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 16px 0', color: '#2E7D32', fontSize: '18px' }}>
-          👤 Inspector Information
-        </h3>
+      <div className="container">
+        {/* Vehicle Info */}
+        {vehicleDetails && (
+          <div className="vehicle-info">
+            <h4><i className="fas fa-truck text-success me-2"></i>{vehicleDetails.make} {vehicleDetails.model}</h4>
+            <p className="text-muted mb-0">Equipment: {equipmentNumber}</p>
+          </div>
+        )}
 
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-            Inspector Name *
-          </label>
-          <input
-            type="text"
-            value={inspectorName}
-            onChange={(e) => setInspectorName(e.target.value)}
-            placeholder="Enter your full name"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              fontSize: '16px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
+        <div className="form-backdrop">
+          <form onSubmit={handleSubmit}>
+          {/* Equipment Identification */}
+          <div className="form-section">
+            <h5><i className="fas fa-qrcode"></i> Equipment Identification</h5>
 
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-            Inspection Date
-          </label>
-          <input
-            type="date"
-            value={inspectionDate}
-            onChange={(e) => setInspectionDate(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              fontSize: '16px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-      </div>
+            <button
+              type="button"
+              className="btn btn-primary w-100 mb-3"
+              onClick={scanQRCode}
+              disabled={isScanning}
+            >
+              {isScanning ? (
+                <>
+                  <i className="fas fa-spinner fa-spin me-2"></i>
+                  Scanning QR Code...
+                </>
+              ) : (
+                <>
+                  <i className="fas fa-qrcode me-2"></i>
+                  Scan Equipment QR Code
+                </>
+              )}
+            </button>
 
-      {/* Vehicle Information */}
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 16px 0', color: '#2E7D32', fontSize: '18px' }}>
-          🚗 Vehicle Information
-        </h3>
-
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-            Vehicle ID *
-          </label>
-          <input
-            type="text"
-            value={vehicleId}
-            onChange={(e) => setVehicleId(e.target.value)}
-            placeholder="Enter or scan vehicle ID"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              fontSize: '16px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-            Equipment Number
-          </label>
-          <input
-            type="text"
-            value={vehicleEquipNo}
-            onChange={(e) => setVehicleEquipNo(e.target.value)}
-            placeholder="Equipment number (optional)"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              fontSize: '16px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
-            Odometer Reading (km)
-          </label>
-          <input
-            type="number"
-            value={odometerReading}
-            onChange={(e) => setOdometerReading(e.target.value)}
-            placeholder="Current odometer reading"
-            style={{
-              width: '100%',
-              padding: '12px',
-              border: '2px solid #ddd',
-              borderRadius: '8px',
-              fontSize: '16px',
-              boxSizing: 'border-box'
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Inspection Categories */}
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 20px 0', color: '#2E7D32', fontSize: '18px' }}>
-          📋 Inspection Categories
-        </h3>
-
-        {inspectionCategories.map((category) => (
-          <div key={category.key} style={{
-            marginBottom: '24px',
-            padding: '16px',
-            border: '1px solid #eee',
-            borderRadius: '8px',
-            background: '#fafafa'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '12px'
-            }}>
-              <h4 style={{
-                margin: 0,
-                fontSize: '16px',
-                color: '#333',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <span style={{ fontSize: '20px' }}>{category.icon}</span>
-                {category.label}
-              </h4>
-
-              <button
-                onClick={() => capturePhoto(category.key)}
-                style={{
-                  background: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  cursor: 'pointer'
+            <div className="input-group">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Or enter equipment number manually"
+                value={equipmentNumber}
+                onChange={(e) => {
+                  const v = e.target.value.toUpperCase().trim();
+                  setEquipmentNumber(v);
+                  // Do not auto-lookup on manual typing; allow direct entry as requested
+                  setScanError('');
                 }}
+              />
+              <button
+                type="button"
+                className="btn btn-outline-primary"
+                onClick={() => equipmentNumber && lookupVehicleDetails(equipmentNumber)}
+                disabled={!equipmentNumber.trim()}
+                title="Look up vehicle details"
               >
-                📸 Photo
+                🔍 Lookup
               </button>
             </div>
 
-            <StarRating
-              value={ratings[category.key]}
-              onChange={(rating) => setRatings(prev => ({ ...prev, [category.key]: rating }))}
-            />
+            {scanError && (
+              <div className="alert alert-danger mt-2">{scanError}</div>
+            )}
 
-            {/* Show photos for this category */}
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
-              {photos
-                .filter(photo => photo.category === category.key)
-                .map((photo) => (
-                  <div key={photo.id} style={{ position: 'relative' }}>
-                    <img
-                      src={photo.preview}
-                      style={{
-                        width: '80px',
-                        height: '80px',
-                        objectFit: 'cover',
-                        borderRadius: '6px',
-                        border: '2px solid #ddd'
-                      }}
-                    />
-                    <div style={{
-                      fontSize: '10px',
-                      textAlign: 'center',
-                      color: '#666',
-                      marginTop: '2px'
-                    }}>
-                      {(photo.ratio * 100).toFixed(0)}%
-                    </div>
+            {kimperDetails && isKimperScan && (
+              <div className="alert alert-info mt-2">
+                <strong>👤 KIMPER Scanned:</strong> {kimperDetails.name || 'Inspector'}
+                <div className="text-muted small">ID: {kimperDetails.id || 'N/A'}</div>
+                <div className="text-success small mt-1">✓ Inspector name auto-filled</div>
+              </div>
+            )}
+
+            {vehicleDetails && !isKimperScan && (
+              <div className="alert alert-success mt-2">
+                <strong>Vehicle Found:</strong> {vehicleDetails.make} {vehicleDetails.model}
+                {locationName && <div className="text-muted small">Location: {locationName}</div>}
+              </div>
+            )}
+          </div>
+
+      {/* Inspector Information */}
+      <div className="form-section" aria-labelledby="inspector-section">
+        <h5 id="inspector-section"><i className="fas fa-user"></i> Inspector Information</h5>
+
+        <div className="inline-field mb-3">
+          <label className="form-label mb-0" htmlFor="inspector-name">Inspector Name *</label>
+          <input
+            id="inspector-name"
+            className="form-control"
+            type="text"
+            value={inspectorName}
+            onChange={(e) => setInspectorName(e.target.value)}
+            placeholder="Enter your name"
+            required
+          />
+        </div>
+
+        <div className="inline-field mb-3">
+          <label className="form-label mb-0" htmlFor="inspection-date">Inspection Date</label>
+          <input
+            id="inspection-date"
+            className="form-control"
+            type="date"
+            value={inspectionDate}
+            onChange={(e) => setInspectionDate(e.target.value)}
+          />
+        </div>
+
+        <div className="inline-field mb-0">
+          <label className="form-label mb-0" htmlFor="odometer">Odometer / Hours Reading</label>
+          <input
+            id="odometer"
+            className="form-control"
+            type="number"
+            value={odometerReading}
+            onChange={(e) => setOdometerReading(e.target.value)}
+            placeholder="Enter current reading"
+            inputMode="numeric"
+          />
+        </div>
+      </div>
+
+          {/* Component Assessment */}
+          <div className="form-section">
+            <h5><i className="fas fa-tools"></i> Component Assessment</h5>
+            <p className="text-muted">Rate each component individually</p>
+            <small className="text-muted"><i className="fas fa-info-circle"></i> These individual ratings contribute to the star rating calculation but don't trigger service requests directly.</small>
+
+            {/* Brakes */}
+            <div className="mb-4">
+              <label className="form-label"><i className="fas fa-stop-circle text-danger"></i> Brakes</label>
+              <div className="btn-group w-100 segmented-3" role="group">
+                <button
+                  type="button"
+                  className={`btn ${brakeCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => setBrakeCondition('good')}
+                >
+                  Good
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${brakeCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
+                  onClick={() => setBrakeCondition('fair')}
+                >
+                  Fair
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${brakeCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => setBrakeCondition('poor')}
+                >
+                  Poor
+                </button>
+              </div>
+            </div>
+
+            {/* Tires */}
+            <div className="mb-4">
+              <label className="form-label"><i className="fas fa-circle text-dark"></i> Tires</label>
+              <div className="btn-group w-100 segmented-3" role="group">
+                <button
+                  type="button"
+                  className={`btn ${tireCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => setTireCondition('good')}
+                >
+                  Good
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${tireCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
+                  onClick={() => setTireCondition('fair')}
+                >
+                  Fair
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${tireCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => setTireCondition('poor')}
+                >
+                  Poor
+                </button>
+              </div>
+            </div>
+
+            {/* Engine */}
+            <div className="mb-4">
+              <label className="form-label"><i className="fas fa-cog text-primary"></i> Engine</label>
+              <div className="btn-group w-100 segmented-3" role="group">
+                <button
+                  type="button"
+                  className={`btn ${engineCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => setEngineCondition('good')}
+                >
+                  Good
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${engineCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
+                  onClick={() => setEngineCondition('fair')}
+                >
+                  Fair
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${engineCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => setEngineCondition('poor')}
+                >
+                  Poor
+                </button>
+              </div>
+            </div>
+
+            {/* Body Exterior */}
+            <div className="mb-4">
+              <label className="form-label"><i className="fas fa-truck text-secondary"></i> Body Exterior</label>
+              <div className="btn-group w-100 segmented-3" role="group">
+                <button
+                  type="button"
+                  className={`btn ${bodyCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => setBodyCondition('good')}
+                >
+                  Good
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${bodyCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
+                  onClick={() => setBodyCondition('fair')}
+                >
+                  Fair
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${bodyCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => setBodyCondition('poor')}
+                >
+                  Poor
+                </button>
+              </div>
+            </div>
+
+            {/* Body Interior */}
+            <div className="mb-4">
+              <label className="form-label"><i className="fas fa-chair text-info"></i> Body Interior</label>
+              <div className="btn-group w-100 segmented-3" role="group">
+                <button
+                  type="button"
+                  className={`btn ${interiorCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
+                  onClick={() => setInteriorCondition('good')}
+                >
+                  Good
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${interiorCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
+                  onClick={() => setInteriorCondition('fair')}
+                >
+                  Fair
+                </button>
+                <button
+                  type="button"
+                  className={`btn ${interiorCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
+                  onClick={() => setInteriorCondition('poor')}
+                >
+                  Poor
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Lights Check */}
+          <div className="form-section">
+            <h5><i className="fas fa-lightbulb text-warning"></i> Lights Check</h5>
+            <p>Are all lights working properly?</p>
+
+            <div className="btn-group w-100" role="group">
+              <button
+                type="button"
+                className={`btn ${lightsWorking === 'yes' ? 'btn-success' : 'btn-outline-success'}`}
+                onClick={() => setLightsWorking('yes')}
+              >
+                <i className="fas fa-check"></i> Yes
+              </button>
+              <button
+                type="button"
+                className={`btn ${lightsWorking === 'no' ? 'btn-danger' : 'btn-outline-danger'}`}
+                onClick={() => setLightsWorking('no')}
+              >
+                <i className="fas fa-times"></i> No
+              </button>
+            </div>
+          </div>
+
+          {/* Overall Vehicle Condition */}
+          <div className="form-section">
+            <h5><i className="fas fa-star text-warning"></i> Overall Vehicle Condition *</h5>
+            <p className="text-muted">This determines the final star rating and inspection status</p>
+
+            <div className="rating-list" role="group">
+              <button
+                type="button"
+                aria-pressed={overallCondition === 'excellent'}
+                className={`choice-row ${overallCondition === 'excellent' ? 'active' : ''}`}
+                onClick={() => setOverallCondition('excellent')}
+              >
+                Excellent (5 stars)
+              </button>
+              <button
+                type="button"
+                aria-pressed={overallCondition === 'good'}
+                className={`choice-row ${overallCondition === 'good' ? 'active' : ''}`}
+                onClick={() => setOverallCondition('good')}
+              >
+                Good (4 stars)
+              </button>
+              <button
+                type="button"
+                aria-pressed={overallCondition === 'fair'}
+                className={`choice-row ${overallCondition === 'fair' ? 'active' : ''}`}
+                onClick={() => setOverallCondition('fair')}
+              >
+                Fair (3 stars)
+              </button>
+              <button
+                type="button"
+                aria-pressed={overallCondition === 'poor'}
+                className={`choice-row ${overallCondition === 'poor' ? 'active' : ''}`}
+                onClick={() => setOverallCondition('poor')}
+              >
+                Poor (2 stars)
+              </button>
+              <button
+                type="button"
+                aria-pressed={overallCondition === 'critical'}
+                className={`choice-row ${overallCondition === 'critical' ? 'active' : ''}`}
+                onClick={() => setOverallCondition('critical')}
+              >
+                Critical (1 star)
+              </button>
+            </div>
+
+            {/* Star Rating Display */}
+            {overallCondition && (
+              <div className="alert alert-info mt-3">
+                <strong>Current Rating:</strong> {calculateStarRating()} stars
+              </div>
+            )}
+
+            {/* Service Request (shown immediately after Overall Condition) */}
+            {(overallCondition === 'poor' || overallCondition === 'critical') && (
+              <div className="mt-3">
+                <div className="alert alert-warning mb-3">
+                  <i className="fas fa-exclamation-triangle me-2"></i>
+                  Overall condition is {overallCondition === 'poor' ? 'Poor (2 stars)' : 'Critical (1 star)'}. Do you want to create a service request?
+                </div>
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="serviceRequestTop"
+                    checked={createServiceRequest}
+                    onChange={(e) => setCreateServiceRequest(e.target.checked)}
+                  />
+                  <label className="form-check-label" htmlFor="serviceRequestTop">
+                    <i className="fas fa-wrench me-2"></i>
+                    Create Service Request
+                  </label>
+                </div>
+              </div>
+            )}
+
+          </div>
+
+          {/* Additional Notes */}
+          <div className="form-section">
+            <h5><i className="fas fa-sticky-note"></i> Additional Notes</h5>
+
+            <div className="inline-field mb-3">
+              <label className="form-label mb-0">Inspection Notes</label>
+              <textarea
+                className="form-control"
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Enter any additional observations or comments..."
+              />
+            </div>
+
+
+          </div>
+
+          {/* Photo Upload */}
+          <div className="form-section">
+            <h5><i className="fas fa-camera"></i> Inspection Photos</h5>
+
+            <button
+              type="button"
+              className="btn btn-outline-primary w-100 mb-3"
+              onClick={addPhoto}
+            >
+              <i className="fas fa-camera me-2"></i>
+              Add Photo
+            </button>
+
+            {photos.length > 0 && (
+              <div className="photo-grid">
+                {photos.map((photo) => (
+                  <div key={photo.id} className="photo-item">
+                    <img src={photo.preview} alt="Inspection" className="img-thumbnail" />
                     <button
-                      onClick={() => setPhotos(prev => prev.filter(p => p.id !== photo.id))}
-                      style={{
-                        position: 'absolute',
-                        top: '-6px',
-                        right: '-6px',
-                        background: '#e74c3c',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '50%',
-                        width: '20px',
-                        height: '20px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
+                      type="button"
+                      className="btn btn-sm btn-danger photo-remove"
+                      onClick={() => removePhoto(photo.id)}
                     >
-                      ×
+                      <i className="fas fa-times"></i>
                     </button>
                   </div>
                 ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Notes Section */}
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 16px 0', color: '#2E7D32', fontSize: '18px' }}>
-          📝 Additional Notes
-        </h3>
-
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder={
-            overallRating <= 2
-              ? "⚠️ Critical/Poor rating - Please describe issues in detail..."
-              : overallRating === 3
-              ? "⚠️ Fair rating - Please note any concerns..."
-              : "Any observations or maintenance notes..."
-          }
-          style={{
-            width: '100%',
-            minHeight: '100px',
-            padding: '12px',
-            border: `2px solid ${overallRating <= 2 ? '#e74c3c' : overallRating === 3 ? '#f39c12' : '#ddd'}`,
-            borderRadius: '8px',
-            fontSize: '16px',
-            fontFamily: 'inherit',
-            resize: 'vertical',
-            boxSizing: 'border-box'
-          }}
-        />
-      </div>
-
-      {/* Summary & Submit */}
-      <div style={{
-        background: 'white',
-        padding: '20px',
-        borderRadius: '12px',
-        marginBottom: '20px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-      }}>
-        <h3 style={{ margin: '0 0 16px 0', color: '#2E7D32', fontSize: '18px' }}>
-          📊 Inspection Summary
-        </h3>
-
-        <div style={{
-          background: '#f8f9fa',
-          padding: '16px',
-          borderRadius: '8px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '14px' }}>
-            {inspectionCategories.map((category) => (
-              <div key={category.key} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{category.icon} {category.label}:</span>
-                <span style={{ fontWeight: 'bold' }}>{ratings[category.key]}/5</span>
               </div>
-            ))}
+            )}
           </div>
 
-          <div style={{
-            marginTop: '16px',
-            paddingTop: '16px',
-            borderTop: '2px solid #ddd',
-            textAlign: 'center'
-          }}>
-            <div style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>
-              Overall Rating: {overallRating}/5 ⭐
-            </div>
-            <div style={{
-              fontSize: '16px',
-              fontWeight: 'bold',
-              color: overallRating <= 2 ? '#e74c3c' : overallRating === 3 ? '#f39c12' : '#27ae60'
-            }}>
-              Status: {overallStatus}
-            </div>
-            <div style={{ fontSize: '14px', color: '#666', marginTop: '4px' }}>
-              Photos: {photos.length} captured
-            </div>
+          {/* GPS Location */}
+          <div className="form-section">
+            <h5><i className="fas fa-map-marker-alt"></i> Location</h5>
+
+            <button
+              type="button"
+              className="btn btn-outline-secondary w-100 mb-3"
+              onClick={getCurrentLocation}
+            >
+              <i className="fas fa-crosshairs me-2"></i>
+              Get Current Location
+            </button>
+
+            {(gpsLatitude && gpsLongitude) && (
+              <div className="alert alert-success">
+                <i className="fas fa-check-circle me-2"></i>
+                Location captured: {gpsLatitude.toFixed(6)}, {gpsLongitude.toFixed(6)}
+              </div>
+            )}
           </div>
+
+
+          {/* Submit Button */}
+          <div className="form-section">
+            <button
+              type="submit"
+              className="btn btn-success btn-lg w-100"
+              disabled={!inspectorName.trim() || !overallCondition}
+            >
+              <i className="fas fa-check-circle me-2"></i>
+              Submit Inspection
+            </button>
+          </div>
+        </form>
         </div>
-
-        <button
-          onClick={submit}
-          style={{
-            width: '100%',
-            padding: '16px',
-            background: 'linear-gradient(135deg, #2E7D32, #4CAF50)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '18px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(46, 125, 50, 0.3)'
-          }}
-        >
-          💾 Save Inspection & Queue for Sync
-        </button>
       </div>
     </div>
   )
 }
-

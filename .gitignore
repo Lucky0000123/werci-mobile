@@ -23,11 +23,52 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment files (IMPORTANT: Keep .env.example, ignore actual .env)
+.env
+.env.local
+.env.production
+.env.*.local
 
 # Capacitor Android build outputs
 android/app/build/
+android/build/
+android/.gradle/
 .android/
+android/local.properties
+
+# iOS build outputs
+ios/App/build/
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/*.xcuserstate
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+
+# APK and AAB files (large binary files)
+*.apk
+*.aab
+
+# Build artifacts
+build/
+.gradle/
 
 # macOS metadata (AppleDouble)
 ._*
 **/._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.swp
+*.swo
+*~

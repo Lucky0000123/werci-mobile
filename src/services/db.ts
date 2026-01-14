@@ -1,9 +1,9 @@
-// IndexedDB wrapper using idb for WERCI mobile
+// IndexedDB wrapper using idb for WERCK mobile
 // Schema v1: inspections, photos, syncQueue, users
 import { openDB } from 'idb'
 import type { DBSchema, IDBPDatabase } from 'idb'
 
-interface WerciDB extends DBSchema {
+interface WerckDB extends DBSchema {
   inspections: {
     key: string // inspectionId
     value: {
@@ -19,13 +19,13 @@ interface WerciDB extends DBSchema {
       overallStars: 1 | 2 | 3 | 4 | 5
       notes?: string
       odometerReading?: number
-      // Individual category ratings
-      tireCondition: 1 | 2 | 3 | 4 | 5
-      brakeCondition: 1 | 2 | 3 | 4 | 5
-      lightsWorking: 1 | 2 | 3 | 4 | 5
-      engineCondition: 1 | 2 | 3 | 4 | 5
-      bodyCondition: 1 | 2 | 3 | 4 | 5
-      interiorCondition: 1 | 2 | 3 | 4 | 5
+      // Component conditions (good/fair/poor)
+      tireCondition: string
+      brakeCondition: string
+      lightsWorking: string // yes/no
+      engineCondition: string
+      bodyExteriorCondition: string
+      bodyInteriorCondition: string
       // GPS coordinates
       gpsLatitude?: number
       gpsLongitude?: number
@@ -65,15 +65,17 @@ interface WerciDB extends DBSchema {
       deviceId: string
       token: string
       lastSync?: number
+      validUntil?: number
+      isTemporary?: boolean
     }
   }
 }
 
-let dbPromise: Promise<IDBPDatabase<WerciDB>> | null = null
+let dbPromise: Promise<IDBPDatabase<WerckDB>> | null = null
 
 export function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<WerciDB>('werci-mobile', 1, {
+    dbPromise = openDB<WerckDB>('werck-mobile', 1, {
       upgrade(db) {
         const insp = db.createObjectStore('inspections', { keyPath: 'id' })
         insp.createIndex('by-updatedAt', 'updatedAt')
@@ -88,22 +90,37 @@ export function getDB() {
   return dbPromise!
 }
 
-export async function enqueue(item: Omit<WerciDB['syncQueue']['value'], 'id' | 'retries' | 'createdAt'>) {
+export async function enqueue(item: Omit<WerckDB['syncQueue']['value'], 'id' | 'retries' | 'createdAt'>) {
   const id = crypto.randomUUID()
   const db = await getDB()
   await db.add('syncQueue', { id, ...item, retries: 0, createdAt: Date.now() })
   return id
 }
 
-export async function setInspection(v: WerciDB['inspections']['value']) {
+export async function setInspection(v: WerckDB['inspections']['value']) {
   const db = await getDB()
   await db.put('inspections', v)
 }
 
-export async function addPhoto(v: WerciDB['photos']['value']) {
+export async function addPhoto(v: WerckDB['photos']['value']) {
   const db = await getDB()
   await db.put('photos', v)
 }
 
-export type { WerciDB }
+export async function clearAllData(): Promise<void> {
+  try {
+    const db = await getDB()
+    // Clear all data stores (only the ones that exist in schema)
+    await db.clear('inspections')
+    await db.clear('photos')
+    await db.clear('users')
+    await db.clear('syncQueue')
+    console.log('🗑️ All cached data cleared successfully')
+  } catch (error) {
+    console.error('❌ Failed to clear cache:', error)
+    throw error
+  }
+}
+
+export type { WerckDB }
 

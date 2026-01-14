@@ -1,8 +1,828 @@
+/* WERCI Mobile App Styling - Optimized for Performance */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  top: 0 !important;
+  left: 0 !important;
+  /* Performance optimizations */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
+  width: 100% !important;
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height for mobile */
+  margin: 0 !important;
+  padding: 0 !important;
+  background-color: #0d1117;
+  display: block !important; /* Changed from flex to block */
+  position: absolute !important; /* Force absolute positioning */
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+}
+
+/* Professional Header - GPU Accelerated */
+.werci-header {
+  background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+  color: white;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 10px rgba(44, 62, 80, 0.1);
+  width: 100%;
+  position: relative;
+  top: 0 !important;
+  left: 0 !important;
+  z-index: 100;
+  /* GPU acceleration for smooth scrolling */
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Header Content Layout */
+.werci-header-content {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0; /* Allow text to shrink */
+}
+
+.werci-logo {
+  height: 32px;
+  width: 32px;
+  margin-right: 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  flex-shrink: 0;
+}
+
+.werci-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.werci-subtitle {
+  font-size: 0.75rem;
+  opacity: 0.9;
+  margin: 0;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+/* Main Content Container */
+.werci-container {
+  padding: 16px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  /* Fix positioning issue */
+  position: relative !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
+/* ========================================
+   REDESIGNED HOME SCREEN STYLES
+   ======================================== */
+
+/* Primary Scan Button Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 8px 25px rgba(79, 172, 254, 0.4);
+  }
+  50% {
+    box-shadow: 0 8px 35px rgba(79, 172, 254, 0.6);
+  }
+}
+
+@keyframes button-press {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.98);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Hover effect for primary scan button */
+button:active {
+  animation: button-press 0.2s ease;
+}
+
+/* Gradient button hover effects */
+button[style*="linear-gradient"]:hover {
+  filter: brightness(1.05);
+  transition: all 0.3s ease;
+}
+
+button[style*="linear-gradient"]:active {
+  filter: brightness(0.95);
+  transform: scale(0.98);
+}
+
+/* Modal slide-up animation */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Apply animations to modals */
+div[style*="position: fixed"][style*="zIndex: 1000"] {
+  animation: fadeIn 0.2s ease;
+}
+
+div[style*="position: fixed"][style*="zIndex: 1000"] > div {
+  animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Advanced options dropdown animation */
+details[open] > div {
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Smooth transitions for all buttons */
+button {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Icon animations */
+@keyframes iconBounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+button:active span[style*="fontSize"] {
+  animation: iconBounce 0.3s ease;
+}
+
+/* Backdrop blur for modals */
+div[style*="background: rgba(0,0,0,0.5)"] {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+/* ========================================
+   END REDESIGNED STYLES
+   ======================================== */
+
+/* Professional Button Layout */
+.werci-button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 20px 0;
+  width: 100%;
+  padding: 0 4px; /* Slight padding for better touch targets */
+}
+
+.werci-button-group button {
+  width: 100%;
+  padding: 16px 20px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-height: 52px; /* Optimal touch target */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.werci-button-group button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.werci-button-group button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Navigation Buttons */
+.werci-nav-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.werci-nav-buttons button {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  min-height: 48px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.werci-nav-buttons button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Button Color Schemes */
+.werci-button-primary {
+  background: linear-gradient(135deg, #6B7280, #4B5563);
+  color: white;
+}
+
+.werci-button-primary:hover {
+  background: linear-gradient(135deg, #4B5563, #374151);
+}
+
+.werci-button-secondary {
+  background: linear-gradient(135deg, #9CA3AF, #6B7280);
+  color: white;
+}
+
+.werci-button-secondary:hover {
+  background: linear-gradient(135deg, #6B7280, #4B5563);
+}
+
+.werci-button-success {
+  background: linear-gradient(135deg, #10B981, #059669);
+  color: white;
+}
+
+.werci-button-success:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.werci-button-warning {
+  background: linear-gradient(135deg, #F59E0B, #D97706);
+  color: white;
+}
+
+.werci-button-warning:hover {
+  background: linear-gradient(135deg, #D97706, #B45309);
+}
+
+.werci-button-danger {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  color: white;
+}
+
+.werci-button-danger:hover {
+  background: linear-gradient(135deg, #DC2626, #B91C1C);
+}
+
+.werci-button-light {
+  background: linear-gradient(135deg, #F9FAFB, #F3F4F6);
+  color: #374151;
+  border: 1px solid #D1D5DB;
+}
+
+.werci-button-light:hover {
+  background: linear-gradient(135deg, #F3F4F6, #E5E7EB);
+  border-color: #9CA3AF;
+}
+
+/* Status and Info Styling */
+.werci-status {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+/* Loading State */
+.werci-loading {
   text-align: center;
+  padding: 40px 20px;
+}
+
+.werci-loading h2 {
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.werci-loading p {
+  color: #6c757d;
+  margin: 0;
+}
+
+/* Professional Form Styling */
+.werci-form {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+  margin: 16px 0;
+}
+
+.werci-form-section {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.werci-form-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.werci-form-section h3 {
+  color: #2c3e50;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.werci-form-group {
+  margin-bottom: 16px;
+}
+
+.werci-form-group label {
+  display: block;
+  color: #374151;
+  font-weight: 500;
+  margin-bottom: 6px;
+  font-size: 0.95rem;
+}
+
+.werci-form-group input,
+.werci-form-group select,
+.werci-form-group textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+  background-color: white;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.werci-form-group input:focus,
+.werci-form-group select:focus,
+.werci-form-group textarea:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.werci-form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* Equipment Identification Styling */
+.werci-equipment-section {
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.werci-equipment-found {
+  background: #f0f9ff;
+  border-color: #3498db;
+}
+
+.werci-equipment-error {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+.werci-qr-button {
+  background: linear-gradient(135deg, #10B981, #059669);
+  border: none;
+  color: white;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  margin: 16px 0;
+  min-height: 56px;
+  transition: all 0.3s ease;
+  box-shadow: 0 3px 6px rgba(16, 185, 129, 0.2);
+  cursor: pointer;
+}
+
+.werci-qr-button:hover {
+  background: linear-gradient(135deg, #059669, #047857);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+}
+
+.werci-qr-button:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 6px rgba(16, 185, 129, 0.2);
+}
+
+.werci-equipment-details {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+  border-left: 4px solid #3498db;
+}
+
+.werci-equipment-details h4 {
+  color: #2c3e50;
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+}
+
+.werci-equipment-details p {
+  color: #6b7280;
+  margin: 4px 0;
+  font-size: 0.9rem;
+}
+
+/* Photo Section Styling */
+.werci-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.werci-photo-item {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: #f3f4f6;
+  border: 2px dashed #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.werci-photo-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.werci-photo-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Submit Button Styling */
+.werci-submit-button {
+  background: linear-gradient(135deg, #6B7280, #4B5563);
+  border: none;
+  color: white;
+  padding: 18px 32px;
+  border-radius: 14px;
+  font-size: 1.15rem;
+  font-weight: 600;
+  width: 100%;
+  margin-top: 28px;
+  min-height: 58px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 8px rgba(107, 114, 128, 0.2);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.werci-submit-button:hover {
+  background: linear-gradient(135deg, #4B5563, #374151);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(107, 114, 128, 0.3);
+}
+
+.werci-submit-button:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 8px rgba(107, 114, 128, 0.2);
+}
+
+.werci-submit-button:disabled {
+  background: linear-gradient(135deg, #D1D5DB, #9CA3AF);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 2px 4px rgba(156, 163, 175, 0.1);
+  opacity: 0.6;
+}
+
+.werci-submit-button:disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 4px rgba(156, 163, 175, 0.1);
+}
+
+/* Mobile-Optimized Button Enhancements */
+@media (max-width: 768px) {
+  /* Ensure proper mobile layout */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -ms-text-size-adjust: 100%;
+  }
+
+  body {
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+  }
+
+  .werci-button-group {
+    gap: 12px;
+    margin: 24px 0;
+    padding: 0 8px;
+  }
+
+  .werci-button-group button {
+    min-height: 56px;
+    padding: 18px 24px;
+    font-size: 1.1rem;
+    border-radius: 12px;
+    touch-action: manipulation;
+  }
+
+  .werci-nav-buttons {
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .werci-nav-buttons button {
+    min-height: 52px;
+    padding: 14px 12px;
+    font-size: 1rem;
+    border-radius: 10px;
+    touch-action: manipulation;
+  }
+
+  .werci-qr-button {
+    min-height: 60px;
+    padding: 20px 28px;
+    font-size: 1.1rem;
+    border-radius: 14px;
+    touch-action: manipulation;
+  }
+
+  .werci-submit-button {
+    min-height: 62px;
+    padding: 20px 36px;
+    font-size: 1.2rem;
+    border-radius: 16px;
+    margin-top: 32px;
+    touch-action: manipulation;
+  }
+
+  /* Fix for inspection form container */
+  .werci-container {
+    padding: 12px;
+  }
+
+  /* Ensure inspection form is properly contained */
+  .professional-inspection-form {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+/* Touch-friendly focus states */
+.werci-button-group button:focus,
+.werci-nav-buttons button:focus,
+.werci-qr-button:focus,
+.werci-submit-button:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.3);
+}
+
+/* Button loading state */
+.werci-button-loading {
+  position: relative;
+  pointer-events: none;
+}
+
+.werci-button-loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid transparent;
+  border-top: 2px solid currentColor;
+  border-radius: 50%;
+  animation: button-spin 1s linear infinite;
+}
+
+@keyframes button-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error and Success Messages */
+.werci-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 12px 0;
+  font-size: 0.9rem;
+}
+
+.werci-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #16a34a;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 12px 0;
+  font-size: 0.9rem;
+}
+
+/* QR Scanning Styles - Fixed for proper camera overlay */
+/* Make body transparent when scanning */
+body.qr-scanning {
+  background: transparent !important;
+}
+
+/* CRITICAL: Hide the entire app UI when camera is active */
+body.qr-scanning #root {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Scanning overlay container */
+.qr-scan-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10000;
+  display: none;
+  pointer-events: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+}
+
+/* Show overlay when scanning */
+body.qr-scanning .qr-scan-overlay {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Scanning frame with semi-transparent background */
+.qr-scan-frame {
+  width: 280px;
+  height: 280px;
+  border: 3px solid rgba(76, 175, 80, 0.9);
+  border-radius: 20px;
+  position: relative;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  background: transparent;
+}
+
+/* Animated scanning line */
+.qr-scan-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #4caf50, transparent);
+  animation: scan-line 2s ease-in-out infinite;
+  border-radius: 2px;
+}
+
+@keyframes scan-line {
+  0%, 100% {
+    top: 0;
+    opacity: 0;
+  }
+  50% {
+    top: calc(100% - 3px);
+    opacity: 1;
+  }
+}
+
+/* Corner decorations - top left */
+.qr-scan-frame::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 40px;
+  height: 40px;
+  border-top: 4px solid #4caf50;
+  border-left: 4px solid #4caf50;
+  border-radius: 20px 0 0 0;
+}
+
+/* Corner decorations - top right */
+.qr-scan-frame::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 40px;
+  height: 40px;
+  border-top: 4px solid #4caf50;
+  border-right: 4px solid #4caf50;
+  border-radius: 0 20px 0 0;
+}
+
+/* Instructions text below frame */
+.qr-scan-instructions {
+  margin-top: 40px;
+  color: white;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  padding: 0 30px;
+  max-width: 90%;
+  line-height: 1.4;
 }
 
 .logo {
@@ -39,4 +859,644 @@
 
 .read-the-docs {
   color: #888;
+}
+
+/* QR Scanning Styles - Removed duplicate, see lines 597-661 for main styles */
+
+/* Comprehensive Inspection Form Styles */
+.werci-instruction {
+  color: #666;
+  font-style: italic;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.werci-category-section {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.werci-category-header h4 {
+  margin: 0 0 12px 0;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+/* Star Rating Component */
+.werci-star-rating {
+  margin-bottom: 12px;
+}
+
+.werci-star-label {
+  display: block;
+  font-weight: 500;
+  color: #495057;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+}
+
+.werci-stars {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.werci-star {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  opacity: 0.3;
+}
+
+.werci-star:hover {
+  opacity: 0.7;
+  transform: scale(1.1);
+}
+
+.werci-star-filled {
+  opacity: 1;
+}
+
+.werci-rating-text {
+  font-size: 0.8rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Photo Section */
+.werci-photo-section {
+  margin-top: 12px;
+}
+
+.werci-photo-button {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.werci-photo-button:hover {
+  background: #218838;
+}
+
+.werci-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.werci-photo-item {
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.werci-photo-item img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.werci-photo-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(220, 53, 69, 0.9);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Location Button */
+.werci-location-button {
+  background: #17a2b8;
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  width: 100%;
+}
+
+.werci-location-button:hover {
+  background: #138496;
+}
+
+.werci-location-display {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #0056b3;
+}
+
+/* Summary Section */
+.werci-summary-section {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border: 2px solid #dee2e6;
+}
+
+.werci-summary-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.werci-stat {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.werci-stat-label {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin-bottom: 4px;
+}
+
+.werci-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.werci-status-pass {
+  color: #28a745 !important;
+}
+
+.werci-status-moderate {
+  color: #ffc107 !important;
+}
+
+.werci-status-failed {
+  color: #dc3545 !important;
+}
+
+.werci-status-pending {
+  color: #6c757d !important;
+}
+
+.werci-category-summary {
+  background: white;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.werci-category-summary h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: #495057;
+}
+
+.werci-category-summary-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #f1f3f4;
+}
+
+.werci-category-summary-item:last-child {
+  border-bottom: none;
+}
+
+/* Original Simple Form Styles */
+.werci-radio-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.werci-radio-option {
+  flex: 1;
+  cursor: pointer;
+}
+
+.werci-radio-option input[type="radio"] {
+  display: none;
+}
+
+.werci-radio-label {
+  display: block;
+  padding: 12px 16px;
+  border: 2px solid #dee2e6;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.werci-radio-option input[type="radio"]:checked + .werci-radio-label.good {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #155724;
+}
+
+.werci-radio-option input[type="radio"]:checked + .werci-radio-label.fair {
+  background: #fff3cd;
+  border-color: #ffc107;
+  color: #856404;
+}
+
+.werci-radio-option input[type="radio"]:checked + .werci-radio-label.poor {
+  background: #f8d7da;
+  border-color: #dc3545;
+  color: #721c24;
+}
+
+.werci-radio-label:hover {
+  border-color: #6c757d;
+}
+
+/* Overall Condition Styles */
+.werci-primary-section {
+  border: 2px solid #007bff;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.werci-alert {
+  background: #d1ecf1;
+  border: 1px solid #bee5eb;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 16px;
+  color: #0c5460;
+  font-size: 0.9rem;
+}
+
+.werci-condition-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.werci-condition-option {
+  cursor: pointer;
+}
+
+.werci-condition-option input[type="radio"] {
+  display: none;
+}
+
+.werci-condition-label {
+  display: block;
+  padding: 16px;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  background: white;
+  transition: all 0.2s ease;
+}
+
+.werci-condition-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.werci-condition-label small {
+  color: #6c757d;
+  font-size: 0.85rem;
+}
+
+.werci-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.werci-badge.success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.werci-badge.warning {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.werci-badge.danger {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.werci-condition-option input[type="radio"]:checked + .werci-condition-label.excellent,
+.werci-condition-option input[type="radio"]:checked + .werci-condition-label.good {
+  border-color: #28a745;
+  background: #d4edda;
+}
+
+.werci-condition-option input[type="radio"]:checked + .werci-condition-label.fair {
+  border-color: #ffc107;
+  background: #fff3cd;
+}
+
+.werci-condition-option input[type="radio"]:checked + .werci-condition-label.poor,
+.werci-condition-option input[type="radio"]:checked + .werci-condition-label.critical {
+  border-color: #dc3545;
+  background: #f8d7da;
+}
+
+.werci-condition-label:hover {
+  border-color: #6c757d;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Bootstrap Form Styles for Original Mobile Inspection */
+.werci-bootstrap-form {
+  background-color: #f8f9fa;
+  min-height: 100vh;
+  padding: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.werci-bootstrap-form .form-section {
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  margin: 15px 0;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.werci-bootstrap-form .form-section h5 {
+  color: #2E7D32;
+  border-bottom: 2px solid #2E7D32;
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+  font-weight: 600;
+}
+
+.werci-bootstrap-form .form-control,
+.werci-bootstrap-form .form-select {
+  font-size: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid #e0e0e0;
+  margin-bottom: 15px;
+}
+
+.werci-bootstrap-form .form-control:focus,
+.werci-bootstrap-form .form-select:focus {
+  border-color: #2E7D32;
+  box-shadow: 0 0 0 0.2rem rgba(46, 125, 50, 0.25);
+}
+
+.werci-bootstrap-form .btn-condition {
+  width: 100%;
+  padding: 15px;
+  margin: 5px 0;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: bold;
+  border: 2px solid transparent;
+}
+
+.werci-bootstrap-form .btn-condition:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.werci-bootstrap-form .btn-check:checked + .btn-condition {
+  border-color: #2E7D32 !important;
+  box-shadow: 0 0 0 0.2rem rgba(46, 125, 50, 0.25) !important;
+}
+
+.werci-bootstrap-form .border-primary {
+  background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 25px;
+}
+
+.werci-bootstrap-form .btn-group {
+  display: flex;
+  width: 100%;
+}
+
+.werci-bootstrap-form .btn-group .btn {
+  flex: 1;
+  padding: 12px 16px;
+  font-weight: 500;
+  border-radius: 6px;
+  margin: 0 2px;
+}
+
+.werci-bootstrap-form .btn-outline-success {
+  color: #28a745;
+  border-color: #28a745;
+}
+
+.werci-bootstrap-form .btn-outline-success:hover,
+.werci-bootstrap-form .btn-check:checked + .btn-outline-success {
+  background-color: #28a745;
+  border-color: #28a745;
+  color: white;
+}
+
+.werci-bootstrap-form .btn-outline-warning {
+  color: #ffc107;
+  border-color: #ffc107;
+}
+
+.werci-bootstrap-form .btn-outline-warning:hover,
+.werci-bootstrap-form .btn-check:checked + .btn-outline-warning {
+  background-color: #ffc107;
+  border-color: #ffc107;
+  color: #212529;
+}
+
+.werci-bootstrap-form .btn-outline-danger {
+  color: #dc3545;
+  border-color: #dc3545;
+}
+
+.werci-bootstrap-form .btn-outline-danger:hover,
+.werci-bootstrap-form .btn-check:checked + .btn-outline-danger {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: white;
+}
+
+.werci-bootstrap-form .btn-group-vertical {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.werci-bootstrap-form .btn-group-vertical .btn {
+  margin: 3px 0;
+  border-radius: 8px;
+}
+
+.werci-bootstrap-form .alert {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.werci-bootstrap-form .alert-info {
+  background-color: #d1ecf1;
+  border-color: #bee5eb;
+  color: #0c5460;
+}
+
+.werci-bootstrap-form .alert-warning {
+  background-color: #fff3cd;
+  border-color: #ffeaa7;
+  color: #856404;
+}
+
+.werci-bootstrap-form .alert-success {
+  background-color: #d4edda;
+  border-color: #c3e6cb;
+  color: #155724;
+}
+
+.werci-bootstrap-form .alert-danger {
+  background-color: #f8d7da;
+  border-color: #f5c6cb;
+  color: #721c24;
+}
+
+.werci-bootstrap-form .badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.werci-bootstrap-form .bg-success {
+  background-color: #28a745 !important;
+  color: white;
+}
+
+.werci-bootstrap-form .bg-warning {
+  background-color: #ffc107 !important;
+  color: #212529;
+}
+
+.werci-bootstrap-form .bg-danger {
+  background-color: #dc3545 !important;
+  color: white;
+}
+
+.werci-bootstrap-form .text-muted {
+  color: #6c757d !important;
+}
+
+.werci-bootstrap-form .text-success {
+  color: #28a745 !important;
+}
+
+.werci-bootstrap-form .text-warning {
+  color: #ffc107 !important;
+}
+
+.werci-bootstrap-form .text-danger {
+  color: #dc3545 !important;
+}
+
+.werci-bootstrap-form .text-primary {
+  color: #007bff !important;
+}
+
+.werci-bootstrap-form .text-secondary {
+  color: #6c757d !important;
+}
+
+.werci-bootstrap-form .text-info {
+  color: #17a2b8 !important;
+}
+
+.werci-bootstrap-form .text-dark {
+  color: #343a40 !important;
+}
+
+.werci-bootstrap-form .d-flex {
+  display: flex !important;
+}
+
+.werci-bootstrap-form .justify-content-between {
+  justify-content: space-between !important;
+}
+
+.werci-bootstrap-form .align-items-center {
+  align-items: center !important;
+}
+
+.werci-bootstrap-form .d-block {
+  display: block !important;
+}
+
+.werci-bootstrap-form .w-100 {
+  width: 100% !important;
+}
+
+.werci-bootstrap-form .mb-3 {
+  margin-bottom: 1rem !important;
+}
+
+.werci-bootstrap-form .mb-4 {
+  margin-bottom: 1.5rem !important;
+}
+
+.werci-bootstrap-form .mt-2 {
+  margin-top: 0.5rem !important;
+}
+
+.werci-bootstrap-form .mt-3 {
+  margin-top: 1rem !important;
+}
+
+.werci-bootstrap-form .submit-btn {
+  background: linear-gradient(135deg, #2E7D32, #4CAF50);
+  border: none;
+  color: white;
+  padding: 16px 32px;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  width: 100%;
+  margin-top: 24px;
+  transition: all 0.3s ease;
+}
+
+.werci-bootstrap-form .submit-btn:hover {
+  background: linear-gradient(135deg, #1b5e20, #388e3c);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(46, 125, 50, 0.3);
 }

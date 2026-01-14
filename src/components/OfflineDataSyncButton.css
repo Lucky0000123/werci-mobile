@@ -1,0 +1,631 @@
+.offline-sync-container {
+  margin: 0;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 15px;
+  border: 1px solid #dee2e6;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.sync-button-group {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+/* Neumorphic Sync Button - From Uiverse.io by xueyuantan */
+.sync-button-group .btn {
+  width: 9em;
+  height: 3em;
+  border-radius: 30em;
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 600;
+  border: none;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  box-shadow: 6px 6px 12px #c5c5c5, -6px -6px 12px #ffffff;
+  background: #f0f0f0;
+  color: #333;
+  transition: all 0.3s ease;
+}
+
+.sync-button-group .btn::before {
+  content: '';
+  width: 0;
+  height: 3em;
+  border-radius: 30em;
+  position: absolute;
+  top: 0;
+  left: 0;
+  background-image: linear-gradient(to right, #0fd850 0%, #f9f047 100%);
+  transition: 0.5s ease;
+  display: block;
+  z-index: -1;
+}
+
+.sync-button-group .btn:hover::before {
+  width: 9em;
+}
+
+.sync-button-group .btn:hover {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.sync-button-group .btn:active {
+  box-shadow: inset 3px 3px 6px #c5c5c5, inset -3px -3px 6px #ffffff;
+}
+
+/* Rectangular Neumorphic Sync Button - Same as Main Button */
+.sync-button-group .btn-sm {
+  width: 6em;
+  height: 3em;
+  border-radius: 30em;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  border: none;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  box-shadow: 6px 6px 12px #c5c5c5, -6px -6px 12px #ffffff;
+  background: #f0f0f0;
+  color: #333;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-button-group .btn-sm::before {
+  content: '';
+  width: 0;
+  height: 100%;
+  border-radius: 30em;
+  position: absolute;
+  top: 0;
+  left: 0;
+  background-image: linear-gradient(to right, #ff6b6b 0%, #ffa500 100%);
+  transition: 0.5s ease;
+  display: block;
+  z-index: -1;
+}
+
+.sync-button-group .btn-sm:hover::before {
+  width: 100%;
+}
+
+.sync-button-group .btn-sm:hover {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.sync-button-group .btn-sm:active {
+  box-shadow: inset 3px 3px 6px #c5c5c5, inset -3px -3px 6px #ffffff;
+}
+
+/* Button states for neumorphic design - all buttons use same base style */
+.sync-button-group .btn-outline-success,
+.sync-button-group .btn-warning,
+.sync-button-group .btn-outline-warning,
+.sync-button-group .btn-outline-secondary,
+.sync-button-group .btn-primary {
+  /* All buttons inherit the neumorphic base style */
+  background: #f0f0f0;
+  color: #333;
+  border: none;
+}
+
+/* Loading state for neumorphic buttons */
+.sync-button-group .btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  animation: none;
+}
+
+.sync-button-group .btn:disabled::before {
+  background-image: linear-gradient(to right, #ccc 0%, #999 100%);
+  width: 100%;
+}
+
+/* Modern Card-Style Sync Buttons */
+.modern-sync-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+  border: none;
+  border-radius: 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+  min-width: 140px;
+  min-height: 100px;
+}
+
+.modern-sync-button.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.modern-sync-button.secondary {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+  min-width: 120px;
+}
+
+.modern-sync-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.modern-sync-button:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.modern-sync-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.modern-sync-button .button-icon {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+}
+
+.modern-sync-button .icon-large {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.modern-sync-button .icon-small {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.modern-sync-button .button-text {
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.modern-sync-button .btn-matrix-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-status-info {
+  text-align: center;
+  min-height: 24px;
+  margin-top: 8px;
+}
+
+.sync-message {
+  font-size: 14px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: inline-block;
+}
+
+.sync-details {
+  margin-top: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  backdrop-filter: blur(5px);
+}
+
+.sync-details small {
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: #495057;
+}
+
+/* Enhanced progress bar styling */
+.progress {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  height: 6px;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #28a745, #20c997, #17a2b8);
+  background-size: 200% 100%;
+  animation: progressShimmer 2s linear infinite;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 12px;
+}
+
+@keyframes progressShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Responsive design */
+@media (max-width: 576px) {
+  .offline-sync-container {
+    padding: 16px;
+    margin: 0 -4px;
+  }
+
+  .sync-button-group {
+    flex-direction: row;
+    gap: 12px;
+    justify-content: center;
+  }
+
+  .modern-sync-button {
+    min-width: 120px;
+    min-height: 90px;
+    padding: 16px 12px;
+  }
+
+  .modern-sync-button.secondary {
+    min-width: 100px;
+  }
+
+  .modern-sync-button .button-text {
+    font-size: 14px;
+  }
+
+  .modern-sync-button .icon-large {
+    font-size: 20px;
+  }
+
+  .sync-button-group .btn {
+    width: 8em;
+    height: 2.5em;
+    font-size: 14px;
+    flex: none;
+  }
+
+  .sync-button-group .btn-sm {
+    flex: none;
+    width: 5em;
+    height: 2.5em;
+    font-size: 12px;
+  }
+
+  .sync-button-group .btn-sm::before {
+    height: 100%;
+  }
+
+  .sync-button-group .btn-sm:hover::before {
+    width: 100%;
+  }
+
+  .sync-message {
+    font-size: 13px;
+    padding: 6px 12px;
+  }
+
+  .sync-details small {
+    font-size: 12px;
+  }
+}
+
+/* Enhanced animations */
+@keyframes pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes slideIn {
+  0% { opacity: 0; transform: translateY(-10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.sync-button-group .btn:disabled {
+  animation: pulse 2s ease-in-out infinite;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.sync-button-group .btn:disabled .spinner-border {
+  animation: spin 1s linear infinite;
+}
+
+/* Message animations */
+.sync-message {
+  animation: slideIn 0.3s ease-out;
+}
+
+.sync-message:empty {
+  display: none;
+}
+
+/* Success/Error message styling */
+.sync-message:contains("✅") {
+  background: linear-gradient(135deg, rgba(40, 167, 69, 0.1), rgba(32, 201, 151, 0.1));
+  border-color: rgba(40, 167, 69, 0.3);
+  color: #155724;
+}
+
+.sync-message:contains("❌") {
+  background: linear-gradient(135deg, rgba(220, 53, 69, 0.1), rgba(255, 107, 107, 0.1));
+  border-color: rgba(220, 53, 69, 0.3);
+  color: #721c24;
+}
+
+.sync-message:contains("📋") {
+  background: linear-gradient(135deg, rgba(0, 123, 255, 0.1), rgba(108, 117, 125, 0.1));
+  border-color: rgba(0, 123, 255, 0.3);
+  color: #004085;
+}
+
+/* Hover effects for interactive elements */
+.offline-sync-container:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Loading state overlay */
+.sync-button-group .btn:disabled::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: inherit;
+}
+
+/* Simple, smooth spinner - like ChatGPT/Grok */
+.simple-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  will-change: transform;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Optimize button loading state */
+.modern-sync-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.modern-sync-button .button-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* ========================================
+   ENHANCED SYNCING ANIMATIONS
+   ======================================== */
+
+/* Ripple Wave Effect - Emanates from button during sync */
+.ripple-wave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 20px;
+  transform: translate(-50%, -50%);
+  animation: ripple 6.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ripple-wave.delay-1 {
+  animation-delay: 2s;
+}
+
+.ripple-wave.delay-2 {
+  animation-delay: 4s;
+}
+
+@keyframes ripple {
+  0% {
+    width: 100%;
+    height: 100%;
+    opacity: 0.8;
+  }
+  100% {
+    width: 140%;
+    height: 140%;
+    opacity: 0;
+  }
+}
+
+/* Swirl Spinner - Smooth rotating swirl loader */
+.sync-loader {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.swirl-spinner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.swirl {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 3px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.9);
+  border-right-color: rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  animation: swirl-rotate 0.8s linear infinite;
+}
+
+@keyframes swirl-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Enhanced button syncing state */
+.modern-sync-button.syncing {
+  animation: sync-pulse 6s ease-in-out infinite;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+  background-size: 200% 200%;
+  animation: sync-gradient 9s ease infinite, sync-pulse 6s ease-in-out infinite;
+}
+
+.modern-sync-button.secondary.syncing {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 50%, #28a745 100%);
+  background-size: 200% 200%;
+  animation: sync-gradient 9s ease infinite, sync-pulse 6s ease-in-out infinite;
+}
+
+@keyframes sync-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes sync-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3), 0 0 0 0 rgba(102, 126, 234, 0.4);
+  }
+  50% {
+    box-shadow: 0 8px 30px rgba(102, 126, 234, 0.5), 0 0 0 8px rgba(102, 126, 234, 0);
+  }
+}
+
+/* Ensure content stays above ripples */
+.modern-sync-button .button-icon,
+.modern-sync-button .button-text {
+  position: relative;
+  z-index: 1;
+}
+
+/* Smooth fade-in for sync loader */
+.sync-loader {
+  animation: fadeInScale 0.3s ease-out;
+}
+
+@keyframes fadeInScale {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Add subtle shimmer to syncing button */
+.modern-sync-button.syncing::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 70%
+  );
+  animation: shimmer 9s infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%) translateY(-100%) rotate(45deg);
+  }
+  100% {
+    transform: translateX(100%) translateY(100%) rotate(45deg);
+  }
+}
+
+/* Responsive adjustments for animations */
+@media (max-width: 576px) {
+  .ripple-wave {
+    border-width: 1.5px;
+  }
+
+  .sync-loader {
+    width: 20px;
+    height: 20px;
+  }
+
+  .swirl {
+    border-width: 2.5px;
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .ripple-wave,
+  .modern-sync-button.syncing,
+  .swirl,
+  .sync-loader {
+    animation: none !important;
+  }
+
+  .modern-sync-button.syncing {
+    opacity: 0.8;
+  }
+}

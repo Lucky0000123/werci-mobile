@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer circle -->
+  <circle cx="100" cy="100" r="95" fill="none" stroke="#000" stroke-width="4"/>
+  
+  <!-- Inner circle -->
+  <circle cx="100" cy="100" r="80" fill="none" stroke="#000" stroke-width="2"/>
+  
+  <!-- Top text curve -->
+  <path id="top-curve" d="M 30 100 A 70 70 0 0 1 170 100" fill="none"/>
+  <text font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#000">
+    <textPath href="#top-curve" startOffset="50%" text-anchor="middle">
+      WEDA ERAMET COMMISSIONING AND
+    </textPath>
+  </text>
+  
+  <!-- Bottom text curve -->
+  <path id="bottom-curve" d="M 170 100 A 70 70 0 0 1 30 100" fill="none"/>
+  <text font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#000">
+    <textPath href="#bottom-curve" startOffset="50%" text-anchor="middle">
+      COMMISSIONING AND INSPECTION
+    </textPath>
+  </text>
+  
+  <!-- Central WERCI text -->
+  <text x="100" y="90" font-family="Arial, sans-serif" font-size="28" font-weight="bold" text-anchor="middle" fill="#000">WERCI</text>
+  
+  <!-- Top vehicle icon (dump truck) -->
+  <g transform="translate(85, 45)">
+    <!-- Truck body -->
+    <rect x="0" y="8" width="25" height="12" fill="#000"/>
+    <!-- Truck bed -->
+    <rect x="25" y="5" width="15" height="15" fill="#000"/>
+    <!-- Wheels -->
+    <circle cx="8" cy="22" r="3" fill="none" stroke="#000" stroke-width="2"/>
+    <circle cx="32" cy="22" r="3" fill="none" stroke="#000" stroke-width="2"/>
+    <!-- Checkmark -->
+    <path d="M 45 8 L 48 11 L 53 6" fill="none" stroke="#000" stroke-width="2"/>
+  </g>
+  
+  <!-- Bottom vehicle icon (car) -->
+  <g transform="translate(85, 130)">
+    <!-- Car body -->
+    <rect x="0" y="8" width="30" height="8" fill="#000"/>
+    <!-- Car roof -->
+    <rect x="8" y="4" width="14" height="8" fill="#000"/>
+    <!-- Wheels -->
+    <circle cx="6" cy="18" r="3" fill="none" stroke="#000" stroke-width="2"/>
+    <circle cx="24" cy="18" r="3" fill="none" stroke="#000" stroke-width="2"/>
+  </g>
+  
+  <!-- Decorative dots -->
+  <circle cx="25" cy="100" r="2" fill="#000"/>
+  <circle cx="175" cy="100" r="2" fill="#000"/>
+</svg>

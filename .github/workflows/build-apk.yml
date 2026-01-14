@@ -11,21 +11,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
           node-version: '20'
+          cache: 'npm'
 
-      - name: Install deps
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
         run: npm ci
 
-      - name: Install Capacitor Android build deps
+      - name: Install Capacitor Android build dependencies
         run: |
           npm install @capacitor/cli@5 @capacitor/android@5 @capacitor/core@5 --no-save
 
-      - name: Build web
+      - name: Create production environment file
+        run: |
+          cat > .env << EOF
+          VITE_CLOUD_BASE=http://159.65.13.232:8082
+          VITE_LOCAL_BASE=http://10.40.21.184:8082
+          VITE_DEV_BASE=http://localhost:8082
+          VITE_API_TIMEOUT=10000
+          VITE_API_RETRIES=3
+          VITE_HEALTH_CHECK_TIMEOUT=5000
+          VITE_AUTH_ENDPOINT=/api/mobile/auth/device
+          VITE_TOKEN_REFRESH_ENDPOINT=/api/mobile/auth/refresh
+          VITE_TOKEN_EXPIRY_HOURS=24
+          VITE_OFFLINE_ENABLED=true
+          VITE_SYNC_INTERVAL=300000
+          VITE_MAX_OFFLINE_ITEMS=1000
+          VITE_PHOTO_QUALITY=0.8
+          VITE_MAX_PHOTO_SIZE=5242880
+          VITE_PHOTO_FORMAT=jpeg
+          VITE_QR_PREFIX=EQUIP:
+          VITE_QR_TIMEOUT=30000
+          VITE_DEBUG_MODE=false
+          VITE_LOG_LEVEL=info
+          VITE_APP_NAME=WERCI Inspector
+          VITE_APP_VERSION=1.0.0
+          VITE_COMPANY_NAME=WERCI
+          EOF
+
+      - name: Build web application
         run: npm run build
 
       - name: Sync Capacitor
@@ -47,7 +81,7 @@ jobs:
           echo "apk_path=$(pwd)/$APK_NAME" >> $GITHUB_OUTPUT
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: werci-mobile-apk
           path: ${{ steps.create_apk.outputs.apk_path }}
@@ -61,10 +95,28 @@ jobs:
           tag_name: v1.0-mobile-${{ github.run_number }}
           name: WERCI Inspector - Mobile Build ${{ github.run_number }}
           body: |
-            ✅ Fresh scaffold (React + Capacitor v5)
-            ✅ QR/KIMPER scanner via capacitor-community/barcode-scanner
-            ✅ Camera capture with JPEG compression
-            ✅ IndexedDB schema v1 (inspections/photos/queue)
-            ✅ Device-token auth stub and centralized API
-            ✅ Offline-first queueing for sync
+            🚀 **WERCI Mobile Inspector APK Build**
+
+            ✅ **Core Features:**
+            - React + TypeScript + Capacitor v5
+            - QR/KIMPER scanner with barcode-scanner
+            - Camera capture with JPEG compression
+            - Offline-first IndexedDB storage
+            - Device-token authentication
+            - Background sync queue
+
+            ✅ **Network Connectivity:**
+            - Auto-detection of company WiFi (10.40.21.x)
+            - Cloud API fallback (159.65.13.232)
+            - Offline mode with local storage
+
+            ✅ **Inspection Features:**
+            - Multi-category inspection forms
+            - Star rating system (1-5)
+            - Photo capture per inspection item
+            - Offline form completion
+            - Background sync when online
+
+            📱 **Installation:** Download and install the APK on Android devices
+            🔧 **Testing:** Use the built-in testing panel for debugging
 
