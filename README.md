@@ -1,5 +1,21 @@
 # WERCI Mobile App - Fleet Inspection
 
+> **Offline-first mobile inspection app for iOS and Android**
+>
+> 📦 **Repository:** https://github.com/Lucky0000123/werci-mobile
+>
+> 🔧 **Status:** Production-ready | iOS & Android compatible
+
+## ✨ Key Features
+
+- ✅ **Offline-first architecture** - Works without internet connection
+- ✅ **QR code scanning** - Scan vehicle QR codes with camera
+- ✅ **Photo capture** - Take and upload inspection photos
+- ✅ **Auto-sync** - Automatically syncs when back online
+- ✅ **IndexedDB storage** - Stores data locally on device
+- ✅ **Network detection** - Switches between company WiFi and cloud server
+- ✅ **iOS & Android** - Single codebase for both platforms
+
 ## 📱 Technology Stack
 
 **NOT React Native** - This is a **React + TypeScript + Capacitor** application:
