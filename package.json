@@ -21,14 +21,15 @@
     "check-env": "node -e \"console.log('Environment check:'); console.log('VITE_CLOUD_BASE:', process.env.VITE_CLOUD_BASE); console.log('VITE_LOCAL_BASE:', process.env.VITE_LOCAL_BASE);\""
   },
   "dependencies": {
-    "@capacitor-community/barcode-scanner": "^4.0.1",
-    "@capacitor/android": "^5.7.8",
-    "@capacitor/app": "^5.0.8",
-    "@capacitor/camera": "^5.0.10",
-    "@capacitor/core": "^5.7.8",
-    "@capacitor/device": "^5.0.8",
-    "@capacitor/network": "^5.0.8",
-    "@capacitor/preferences": "^5.0.8",
+    "@capacitor-mlkit/barcode-scanning": "^6.1.0",
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/camera": "^6.0.2",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/device": "^6.0.1",
+    "@capacitor/ios": "^6.2.0",
+    "@capacitor/network": "^6.0.2",
+    "@capacitor/preferences": "^6.0.2",
     "@ionic/pwa-elements": "^3.3.0",
     "@zxing/library": "^0.21.3",
     "esbuild": "^0.25.12",
@@ -37,7 +38,7 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^5.7.8",
+    "@capacitor/cli": "^6.2.0",
     "@eslint/js": "^9.35.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^15.0.7",

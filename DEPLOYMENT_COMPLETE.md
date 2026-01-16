@@ -79,12 +79,12 @@ SQL Server:      sql.werci.my.id:1434 (via Cloudflare Tunnel)
 
 ### **Capacitor Plugins:**
 ```
-✅ @capacitor-community/barcode-scanner@4.0.1
-✅ @capacitor/app@5.0.8
-✅ @capacitor/camera@5.0.10
-✅ @capacitor/device@5.0.8
-✅ @capacitor/network@5.0.8
-✅ @capacitor/preferences@5.0.8
+✅ @capacitor-mlkit/barcode-scanning@6.1.0
+✅ @capacitor/app@6.0.1
+✅ @capacitor/camera@6.0.2
+✅ @capacitor/device@6.0.1
+✅ @capacitor/network@6.0.2
+✅ @capacitor/preferences@6.0.2
 ```
 
 ---

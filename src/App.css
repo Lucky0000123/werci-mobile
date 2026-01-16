@@ -718,9 +718,11 @@ div[style*="background: rgba(0,0,0,0.5)"] {
 }
 
 /* QR Scanning Styles - Fixed for proper camera overlay */
-/* Make body transparent when scanning */
+/* Make html and body transparent when scanning */
+html.qr-scanning,
 body.qr-scanning {
   background: transparent !important;
+  background-color: transparent !important;
 }
 
 /* CRITICAL: Hide the entire app UI when camera is active */

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import { Camera, CameraResultType } from '@capacitor/camera'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning'
+import { Capacitor } from '@capacitor/core'
 import { compressDataUrl } from '../../services/compress'
 import { sqlServerService, type Inspection } from '../../services/sqlserver'
 import { apiFetch } from '../../services/api'
@@ -167,34 +168,58 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
       setScanError('')
 
       // Check camera permission
-      const status = await BarcodeScanner.checkPermission({ force: true })
-      if (!status.granted) {
-        setScanError('Camera permission denied')
-        setIsScanning(false)
-        return
+      const { camera } = await BarcodeScanner.checkPermissions()
+
+      if (camera !== 'granted') {
+        const { camera: requestedPermission } = await BarcodeScanner.requestPermissions()
+        if (requestedPermission !== 'granted') {
+          setScanError('Camera permission denied')
+          setIsScanning(false)
+          return
+        }
       }
 
-      // Hide background and start scanning
-      await BarcodeScanner.hideBackground()
+      // Start scanning
+      document.querySelector('html')?.classList.add('qr-scanning')
       document.body.classList.add('qr-scanning')
 
-      const result = await BarcodeScanner.startScan()
+      // Set up barcode listener
+      let scannedBarcode: string | null = null
+      const listener = await BarcodeScanner.addListener('barcodeScanned', async (result) => {
+        console.log('🔍 Barcode scanned:', result.barcode)
+        scannedBarcode = result.barcode.displayValue
 
-      // Cleanup
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
-      setIsScanning(false)
+        // Stop scanning and cleanup
+        await BarcodeScanner.stopScan()
+        document.querySelector('html')?.classList.remove('qr-scanning')
+        document.body.classList.remove('qr-scanning')
+        setIsScanning(false)
+        listener.remove()
 
-      if (result.hasContent && result.content) {
-        console.log('🔍 QR Code scanned:', result.content)
-        await processQRCode(result.content)
+        // Process the scanned barcode
+        if (scannedBarcode) {
+          console.log('🔍 QR Code scanned:', scannedBarcode)
+          await processQRCode(scannedBarcode)
+        }
+      })
+
+      // Install Google Barcode Scanner module (Android only)
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          await BarcodeScanner.installGoogleBarcodeScannerModule()
+        } catch (error) {
+          console.log('ℹ️ Google Barcode Scanner module already installed or not needed')
+        }
       }
+
+      await BarcodeScanner.startScan()
+
     } catch (error) {
       console.error('❌ QR scan error:', error)
       setScanError('QR scan failed: ' + (error as Error).message)
       setIsScanning(false)
       document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
+      await BarcodeScanner.stopScan().catch(() => {})
     }
   }
 

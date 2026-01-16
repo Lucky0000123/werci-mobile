@@ -147,9 +147,9 @@ After installing the updated app:
 ## 📋 Technical Details
 
 ### Barcode Scanner Plugin
-- **Package**: `@capacitor-community/barcode-scanner` v4.0.1
-- **Camera Plugin**: `@capacitor/camera` v5.0.10
-- **Platform**: Capacitor 5.7.8
+- **Package**: `@capacitor-mlkit/barcode-scanning` v6.1.0
+- **Camera Plugin**: `@capacitor/camera` v6.0.2
+- **Platform**: Capacitor 6.2.0
 
 ### Configuration Files Updated
 - ✅ `android/app/src/main/AndroidManifest.xml` - Added camera permissions

@@ -18,7 +18,8 @@ import { offlineDataSync } from './services/offlineDataSync'
 import TestingPanel from './components/TestingPanel'
 import werciLogo from './assets/werck-logo-new.png'
 import { App as CapacitorApp } from '@capacitor/app'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning'
+import { Capacitor } from '@capacitor/core'
 // import { connectionManager } from './services/connectionManager' // Temporarily disabled
 
 
@@ -272,31 +273,68 @@ function App() {
   // Direct QR scan function - bypasses Scanner page
   const handleDirectScan = async () => {
     try {
+      console.log('🔵 Scan button clicked!')
+
       // Check camera permission
-      const status = await BarcodeScanner.checkPermission({ force: true })
-      if (!status.granted) {
-        alert('📷 Camera permission is required for QR scanning')
-        return
+      console.log('🔵 Checking camera permission...')
+      const { camera } = await BarcodeScanner.checkPermissions()
+      console.log('🔵 Permission status:', camera)
+
+      if (camera !== 'granted') {
+        console.log('🔵 Requesting camera permission...')
+        const { camera: requestedPermission } = await BarcodeScanner.requestPermissions()
+        console.log('🔵 Requested permission status:', requestedPermission)
+
+        if (requestedPermission !== 'granted') {
+          console.log('❌ Camera permission denied')
+          alert('📷 Camera permission is required for QR scanning. Please enable camera access in Settings.')
+          return
+        }
       }
 
-      // Hide background and start scanning
-      await BarcodeScanner.hideBackground()
+      console.log('✅ Camera permission granted, starting scan...')
+
+      // Add scanning class for UI
+      document.querySelector('html')?.classList.add('qr-scanning')
       document.body.classList.add('qr-scanning')
 
-      const result = await BarcodeScanner.startScan()
+      // Set up barcode listener
+      let scannedBarcode: string | null = null
+      const listener = await BarcodeScanner.addListener('barcodeScanned', async (result) => {
+        console.log('🔍 Barcode scanned:', result.barcode)
+        scannedBarcode = result.barcode.displayValue
 
-      // Cleanup
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
+        // Stop scanning and cleanup
+        await BarcodeScanner.stopScan()
+        document.querySelector('html')?.classList.remove('qr-scanning')
+        document.body.classList.remove('qr-scanning')
+        listener.remove()
 
-      if (result.hasContent && result.content) {
-        console.log('🔍 QR Code scanned:', result.content)
-        await handleQRScanResult(result.content)
+        // Process the scanned barcode
+        if (scannedBarcode) {
+          console.log('🔍 QR Code scanned:', scannedBarcode)
+          await handleQRScanResult(scannedBarcode)
+        }
+      })
+
+      // Install Google Barcode Scanner module (Android only)
+      if (Capacitor.getPlatform() === 'android') {
+        try {
+          console.log('🔵 Installing barcode scanner module...')
+          await BarcodeScanner.installGoogleBarcodeScannerModule()
+        } catch (error) {
+          console.log('ℹ️ Google Barcode Scanner module already installed or not needed')
+        }
       }
+
+      console.log('🔵 Starting scanner...')
+      await BarcodeScanner.startScan()
+      console.log('🔵 Scanner started, waiting for QR code...')
+
     } catch (error) {
       console.error('❌ QR scan error:', error)
       document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
+      await BarcodeScanner.stopScan().catch(() => {}) // Cleanup on error
       alert('Failed to scan QR code: ' + (error as Error).message)
     }
   }

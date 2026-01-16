@@ -15,9 +15,6 @@ const config: CapacitorConfig = {
     },
     Camera: {
       permissions: ['camera', 'photos']
-    },
-    BarcodeScanner: {
-      permissions: ['camera']
     }
   }
 };

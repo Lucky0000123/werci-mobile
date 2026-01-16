@@ -162,9 +162,9 @@ After installing the updated app:
 ## 🔧 Technical Details
 
 ### Barcode Scanner Implementation
-- **Plugin**: `@capacitor-community/barcode-scanner` v4.0.1
-- **Camera Plugin**: `@capacitor/camera` v5.0.10
-- **Framework**: Capacitor 5.7.8 + React + TypeScript
+- **Plugin**: `@capacitor-mlkit/barcode-scanning` v6.1.0
+- **Camera Plugin**: `@capacitor/camera` v6.0.2
+- **Framework**: Capacitor 6.2.0 + React + TypeScript
 
 ### Scanner Components
 1. **Scanner.tsx** - Main QR scanner component

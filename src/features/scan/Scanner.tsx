@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { App as CapacitorApp } from '@capacitor/app'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning'
+import { Capacitor } from '@capacitor/core'
 
 export default function Scanner({ onResult, onClose }: { onResult: (code: string) => void; onClose?: () => void }) {
   const [permission, setPermission] = useState<boolean>(false)
@@ -11,7 +12,7 @@ export default function Scanner({ onResult, onClose }: { onResult: (code: string
     return () => {
       if (active) {
         BarcodeScanner.stopScan().catch(() => {})
-        BarcodeScanner.showBackground()
+        document.querySelector('html')?.classList.remove('qr-scanning')
         document.body.classList.remove('qr-scanning')
       }
     }
@@ -29,13 +30,15 @@ export default function Scanner({ onResult, onClose }: { onResult: (code: string
       }
     })()
 
-    backHandler = CapacitorApp.addListener('backButton', async () => {
-      try {
-        await stop()
-      } finally {
-        if (onClose) onClose()
-      }
-    })
+    ;(async () => {
+      backHandler = await CapacitorApp.addListener('backButton', async () => {
+        try {
+          await stop()
+        } finally {
+          if (onClose) onClose()
+        }
+      })
+    })()
 
     return () => {
       if (backHandler && typeof backHandler.remove === 'function') {
@@ -45,27 +48,56 @@ export default function Scanner({ onResult, onClose }: { onResult: (code: string
   }, [])
 
   async function start() {
-    const status = await BarcodeScanner.checkPermission({ force: true })
-    setPermission(!!status.granted)
-    if (!status.granted) return
+    // Check camera permission
+    const { camera } = await BarcodeScanner.checkPermissions()
 
-    await BarcodeScanner.hideBackground()
+    if (camera !== 'granted') {
+      const { camera: requestedPermission } = await BarcodeScanner.requestPermissions()
+      setPermission(requestedPermission === 'granted')
+      if (requestedPermission !== 'granted') return
+    } else {
+      setPermission(true)
+    }
+
+    document.querySelector('html')?.classList.add('qr-scanning')
     document.body.classList.add('qr-scanning')
     setActive(true)
 
-    const result = await BarcodeScanner.startScan()
-    setActive(false)
-    BarcodeScanner.showBackground()
-    document.body.classList.remove('qr-scanning')
+    // Set up barcode listener
+    const listener = await BarcodeScanner.addListener('barcodeScanned', async (result) => {
+      console.log('🔍 Barcode scanned:', result.barcode)
+      const scannedCode = result.barcode.displayValue
 
-    if (result.hasContent && result.content) onResult(result.content)
+      // Stop scanning and cleanup
+      await BarcodeScanner.stopScan()
+      document.querySelector('html')?.classList.remove('qr-scanning')
+      document.body.classList.remove('qr-scanning')
+      setActive(false)
+      listener.remove()
+
+      // Process the scanned barcode
+      if (scannedCode) {
+        onResult(scannedCode)
+      }
+    })
+
+    // Install Google Barcode Scanner module (Android only)
+    if (Capacitor.getPlatform() === 'android') {
+      try {
+        await BarcodeScanner.installGoogleBarcodeScannerModule()
+      } catch (error) {
+        console.log('ℹ️ Google Barcode Scanner module already installed or not needed')
+      }
+    }
+
+    await BarcodeScanner.startScan()
   }
 
   async function stop() {
     try {
       await BarcodeScanner.stopScan()
     } catch (_) {}
-    BarcodeScanner.showBackground()
+    document.querySelector('html')?.classList.remove('qr-scanning')
     document.body.classList.remove('qr-scanning')
     setActive(false)
   }
