@@ -464,8 +464,10 @@ function AppContent() {
   }
 
   const openPersonDetail = (cardData: PersonCardData) => {
+    // fromScan lets PersonDetailPage auto-open the vehicle-pairing flow for
+    // QR-scanned KIMPER holders (physical presence at the gate/parking).
     navigate(buildPersonDetailPath(getPersonLookupFromCardData(cardData)), {
-      state: { cardData },
+      state: { cardData, fromScan: true },
     })
   }
 

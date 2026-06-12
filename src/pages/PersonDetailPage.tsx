@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import PersonDeviationHistory from '../features/deviation/PersonDeviationHistory'
 import PairVehicleModal from '../components/PairVehicleModal'
+import { apiFetch } from '../services/api'
 import { offlineDataSync } from '../services/offlineDataSync'
 import type { PersonCardData, PersonLookupParams } from '../services/offlineDataSync'
 import { buildPersonDetailPath, getPersonLookupFromCardData } from '../utils/personRoute'
@@ -184,6 +185,8 @@ export default function PersonDetailPage() {
   const [loading, setLoading] = useState(!location.state?.cardData)
   const [error, setError] = useState<string | null>(null)
   const [showPairModal, setShowPairModal] = useState(false)
+  const [currentPairing, setCurrentPairing] = useState<{ vehicle_no: string; paired_at?: string } | null>(null)
+  const fromScan = Boolean(location.state?.fromScan)
 
 
   const lookup = useMemo<PersonLookupParams>(() => {
@@ -260,6 +263,57 @@ export default function PersonDetailPage() {
     }
   }, [cardData])
 
+  // ── Driver↔vehicle pairing state (drivers = people with a KIMPER) ────────
+  const personEmployeeId = cardData?.person?.employee_id ? String(cardData.person.employee_id) : null
+  const personHasKimper = Boolean(
+    cardData?.person?.kimper_id != null || cardData?.kimper || cardData?.person?.kimper_status
+  )
+  const autoOpenedPairing = useRef(false)
+
+  const loadCurrentPairing = async (): Promise<{ vehicle_no: string; paired_at?: string } | null> => {
+    if (!personEmployeeId) return null
+    try {
+      const res = await apiFetch(`/api/mobile/pairing/by-employee?employee_id=${encodeURIComponent(personEmployeeId)}`)
+      const body = (await res.json().catch(() => null)) as { pairing?: { vehicle_no: string; paired_at?: string } | null } | null
+      const pairing = body?.pairing ?? null
+      setCurrentPairing(pairing)
+      return pairing
+    } catch {
+      return null // offline — pairing status simply not shown
+    }
+  }
+
+  // Fetch the person's active pairing; after a QR scan of a KIMPER holder
+  // who is not yet paired, auto-open the pairing flow (the user's requested
+  // gate: scan + has KIMPER → ask which vehicle).
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const pairing = await loadCurrentPairing()
+      if (cancelled) return
+      if (fromScan && personHasKimper && !pairing && !autoOpenedPairing.current) {
+        autoOpenedPairing.current = true
+        setShowPairModal(true)
+      }
+    }
+    if (personHasKimper && personEmployeeId) void run()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personEmployeeId, personHasKimper, fromScan])
+
+  const handleUnpair = async () => {
+    if (!personEmployeeId) return
+    try {
+      await apiFetch('/api/mobile/pairing/end', {
+        method: 'POST',
+        body: JSON.stringify({ employee_id: personEmployeeId }),
+      })
+      setCurrentPairing(null)
+    } catch {
+      /* keep banner; retry later */
+    }
+  }
+
   if (loading) {
     return (
       <div style={{ minHeight: '100%', display: 'grid', placeItems: 'center', background: C.bg, color: C.textMut, padding: '32px' }}>
@@ -295,6 +349,14 @@ export default function PersonDetailPage() {
   const reportDeviation = () => navigate('/deviation-report', { state: { personCardData: cardData } })
   const displayName = person.name || employee.name || 'Unified workforce profile'
   const profileImage = employee.photo_url || buildFallbackPortrait(displayName)
+  const hasKimper = personHasKimper
+  const authorizedUnitsList = (() => {
+    const raw = (person as { authorized_units?: unknown }).authorized_units
+      ?? (kimper as { authorized_units?: unknown } | undefined)?.authorized_units
+    if (!raw) return null
+    if (Array.isArray(raw)) return raw.filter(Boolean).map(String)
+    return String(raw).split(',').map(s => s.trim()).filter(Boolean)
+  })()
   const usingFallbackPhoto = !employee.photo_url
   const companyLine = [person.company || employee.company, person.department || employee.department, person.section || employee.section].filter(Boolean)
   const roleLine = [person.position_title || employee.position, person.position_level || employee.position_level].filter(Boolean).join(' · ')
@@ -422,28 +484,72 @@ export default function PersonDetailPage() {
               </div>
             )}
 
-            {/* Driver ↔ vehicle pairing — "what truck are you driving today?" */}
-            <button
-              onClick={() => setShowPairModal(true)}
-              style={{
-                width: '100%', marginTop: '14px', padding: '13px',
-                borderRadius: '14px', border: 'none', cursor: 'pointer',
-                background: 'linear-gradient(135deg, #FC4100, #C9340A)',
-                color: '#fff', fontWeight: 800, fontSize: '0.92rem',
-                boxShadow: '0 8px 20px rgba(252,65,0,0.3)',
-              }}
-            >
-              🚛 Assign Vehicle for Today
-            </button>
+            {/* Driver ↔ vehicle pairing — only offered when the person holds
+                a KIMPER (drivers only); auto-opens when they were QR-scanned. */}
+            {hasKimper && (
+              currentPairing ? (
+                <div style={{
+                  marginTop: '14px', padding: '12px 14px', borderRadius: '14px',
+                  background: '#f0fdf4', border: '1px solid #bbf7d0',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Currently paired
+                    </div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: C.textPri }}>
+                      🚛 {currentPairing.vehicle_no}
+                      {currentPairing.paired_at && (
+                        <span style={{ fontSize: '0.74rem', fontWeight: 500, color: C.textMut }}>
+                          {' '}· since {new Date(currentPairing.paired_at + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleUnpair}
+                    style={{
+                      padding: '9px 14px', borderRadius: '10px', border: '1px solid #fecaca',
+                      background: '#fff', color: '#b91c1c', fontWeight: 700,
+                      fontSize: '0.78rem', cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    Unpair
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowPairModal(true)}
+                  style={{
+                    width: '100%', marginTop: '14px', padding: '13px',
+                    borderRadius: '14px', border: 'none', cursor: 'pointer',
+                    background: 'linear-gradient(135deg, #FC4100, #C9340A)',
+                    color: '#fff', fontWeight: 800, fontSize: '0.92rem',
+                    boxShadow: '0 8px 20px rgba(252,65,0,0.3)',
+                  }}
+                >
+                  🚛 Assign Vehicle for Today
+                </button>
+              )
+            )}
           </div>
         </div>
 
         {showPairModal && (
           <PairVehicleModal
-            employeeId={person.employee_id ? String(person.employee_id) : null}
-            kimperId={person.kimper_id ?? kimper?.kimper_id ?? null}
-            driverName={displayName}
-            onClose={() => setShowPairModal(false)}
+            driver={{
+              name: displayName,
+              employeeId: person.employee_id ? String(person.employee_id) : null,
+              kimperId: person.kimper_id ?? kimper?.kimper_id ?? null,
+              kimperStatus: kimper?.status ?? person.kimper_status ?? null,
+              kimperExpiredDate: (kimper as { kimper_expired_date?: string } | undefined)?.kimper_expired_date ?? null,
+              authorizedUnits: authorizedUnitsList,
+              photoUrl: profileImage,
+            }}
+            onClose={(paired) => {
+              setShowPairModal(false)
+              if (paired) void loadCurrentPairing()
+            }}
           />
         )}
 
