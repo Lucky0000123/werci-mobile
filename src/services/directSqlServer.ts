@@ -1,5 +1,16 @@
-// Direct SQL Server connection for WERCI mobile app
-// Connects directly to SQL Server when on company network (10.40.20.184)
+import { getStoredToken } from './api'
+
+// All PRISM data endpoints now require auth; attach the persisted session token.
+function authHeader(): Record<string, string> {
+  const token = getStoredToken()
+  return token ? { 'Authorization': `Bearer ${token}` } : {}
+}
+
+// Direct SQL Server connection for PRISM mobile app
+// Connects directly to the backend API server that can reach SQL Server.
+
+const DEV_BASE = import.meta.env.VITE_DEV_BASE || 'http://10.0.2.2:8082'
+const LOCAL_BASE = import.meta.env.VITE_LOCAL_BASE || 'http://10.40.20.184:8082'
 
 interface SQLServerConfig {
   server: string
@@ -38,12 +49,36 @@ class DirectSQLServerService {
   private isConnected = false
   private baseUrl: string | null = null
 
+  private getCandidateBaseUrls(): string[] {
+    return Array.from(new Set([
+      LOCAL_BASE,
+      DEV_BASE,
+      'http://localhost:8082',
+      `http://${this.config.server}:8082`
+    ]))
+  }
+
+  private async probeBaseUrl(baseUrl: string, timeoutMs = 3000): Promise<boolean> {
+    try {
+      const response = await fetch(`${baseUrl}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(timeoutMs)
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+
   constructor() {
+    // NOTE: Credentials are NOT stored in the mobile app.
+    // The mobile app communicates with the backend API server which handles DB connections.
+    // This config is only used for server address resolution.
     this.config = {
       server: '10.40.20.184',
       database: 'Safety',
-      username: 'Rahul',
-      password: 'Radhaswami@4',
+      username: '',  // Handled by backend API server
+      password: '',  // Handled by backend API server
       port: 1434,
       trustServerCertificate: true
     }
@@ -53,32 +88,11 @@ class DirectSQLServerService {
   private async getBaseUrl(): Promise<string> {
     if (this.baseUrl) return this.baseUrl
 
-    try {
-      // Try localhost first (development)
-      const localResponse = await fetch('http://localhost:8082/health', {
-        method: 'GET',
-        signal: AbortSignal.timeout(2000)
-      })
-      if (localResponse.ok) {
-        this.baseUrl = 'http://localhost:8082'
+    for (const candidate of this.getCandidateBaseUrls()) {
+      if (await this.probeBaseUrl(candidate, 2000)) {
+        this.baseUrl = candidate
         return this.baseUrl
       }
-    } catch (error) {
-      // Localhost not available, try company server
-    }
-
-    // Try company server
-    try {
-      const companyResponse = await fetch(`http://${this.config.server}:8082/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(3000)
-      })
-      if (companyResponse.ok) {
-        this.baseUrl = `http://${this.config.server}:8082`
-        return this.baseUrl
-      }
-    } catch (error) {
-      // Company server not available
     }
 
     throw new Error('No available server connection')
@@ -87,31 +101,16 @@ class DirectSQLServerService {
   // Check if we're on company network (can reach SQL Server directly)
   async isOnCompanyNetwork(): Promise<boolean> {
     try {
-      // First try localhost (for development)
-      try {
-        const localResponse = await fetch('http://localhost:8082/health', {
-          method: 'GET',
-          signal: AbortSignal.timeout(2000)
-        })
-        if (localResponse.ok) {
-          console.log('🏠 Using local development server (localhost:8082)')
+      for (const candidate of this.getCandidateBaseUrls()) {
+        if (await this.probeBaseUrl(candidate, 2000)) {
+          this.baseUrl = candidate
+          console.log(`🏠 Using backend API server (${candidate})`)
           return true
         }
-      } catch (localError) {
-        console.log('🏠 Local server not available, trying company network...')
       }
 
-      // Then try company network SQL Server
-      const response = await fetch(`http://${this.config.server}:8082/health`, {
-        method: 'GET',
-        signal: AbortSignal.timeout(3000)
-      })
-      if (response.ok) {
-        console.log('🏢 Using company network SQL Server')
-        return true
-      }
       return false
-    } catch (error) {
+    } catch {
       console.log('📡 Not on company network, SQL Server not directly accessible')
       return false
     }
@@ -129,7 +128,7 @@ class DirectSQLServerService {
 
       const response = await fetch(`${baseUrl}/api/mobile/vehicles/essential`, {
         method: 'GET',
-        headers: {
+        headers: { ...authHeader(),
           'Content-Type': 'application/json'
         },
         signal: AbortSignal.timeout(10000)
@@ -159,7 +158,7 @@ class DirectSQLServerService {
 
       const response = await fetch(`${baseUrl}/api/mobile/kimper/essential`, {
         method: 'GET',
-        headers: {
+        headers: { ...authHeader(),
           'Content-Type': 'application/json'
         },
         signal: AbortSignal.timeout(10000)
@@ -189,7 +188,7 @@ class DirectSQLServerService {
 
       const response = await fetch(`${baseUrl}/api/mobile/inspections/recent`, {
         method: 'GET',
-        headers: {
+        headers: { ...authHeader(),
           'Content-Type': 'application/json'
         },
         signal: AbortSignal.timeout(10000)
@@ -207,6 +206,151 @@ class DirectSQLServerService {
     }
   }
 
+  // ============================================
+  // COMPLETE DATA FETCH METHODS (Version 1.1.0)
+  // ============================================
+  
+  // Get COMPLETE vehicle data for offline storage
+  async getVehiclesComplete(): Promise<any[]> {
+    if (!(await this.isOnCompanyNetwork())) {
+      throw new Error('Not on company network')
+    }
+
+    try {
+      const baseUrl = await this.getBaseUrl()
+      console.log(`🚛 Fetching COMPLETE vehicle data from: ${baseUrl}`)
+
+      const response = await fetch(`${baseUrl}/api/mobile/vehicles/all`, {
+        method: 'GET',
+        headers: { ...authHeader(), 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate, br' },
+        signal: AbortSignal.timeout(300000) // 5 min — sync-grade timeout for growing datasets
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server API error: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result.data || []
+    } catch (error) {
+      console.error('❌ Complete vehicle data fetch failed:', error)
+      throw error
+    }
+  }
+
+  // Get COMPLETE KIMPER data for offline storage
+  async getKimperComplete(): Promise<any[]> {
+    if (!(await this.isOnCompanyNetwork())) {
+      throw new Error('Not on company network')
+    }
+
+    try {
+      const baseUrl = await this.getBaseUrl()
+      console.log(`👷 Fetching COMPLETE KIMPER data from: ${baseUrl}`)
+
+      const response = await fetch(`${baseUrl}/api/mobile/kimper/all`, {
+        method: 'GET',
+        headers: { ...authHeader(), 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate, br' },
+        signal: AbortSignal.timeout(300000) // 5 min — sync-grade timeout for growing datasets
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server API error: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result.data || []
+    } catch (error) {
+      console.error('❌ Complete KIMPER data fetch failed:', error)
+      throw error
+    }
+  }
+
+  // Get COMPLETE employee data for offline storage
+  async getEmployeesComplete(): Promise<any[]> {
+    if (!(await this.isOnCompanyNetwork())) {
+      throw new Error('Not on company network')
+    }
+
+    try {
+      const baseUrl = await this.getBaseUrl()
+      console.log(`👤 Fetching COMPLETE employee data from: ${baseUrl}`)
+
+      const response = await fetch(`${baseUrl}/api/mobile/employees/master/all`, {
+        method: 'GET',
+        headers: { ...authHeader(), 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate, br' },
+        signal: AbortSignal.timeout(300000) // 5 min — sync-grade timeout for growing datasets
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server API error: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result.data || []
+    } catch (error) {
+      console.error('❌ Complete employee data fetch failed:', error)
+      throw error
+    }
+  }
+
+  async getEmployeeCardsComplete(): Promise<any[]> {
+    if (!(await this.isOnCompanyNetwork())) {
+      throw new Error('Not on company network')
+    }
+
+    try {
+      const baseUrl = await this.getBaseUrl()
+      console.log(`🪪 Fetching COMPLETE employee card data from: ${baseUrl}`)
+
+      const response = await fetch(`${baseUrl}/api/mobile/employees/cards/all`, {
+        method: 'GET',
+        headers: { ...authHeader(), 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate, br' },
+        signal: AbortSignal.timeout(300000) // 5 min — sync-grade timeout for growing datasets
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server API error: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result.data || []
+    } catch (error) {
+      console.error('❌ Complete employee card data fetch failed:', error)
+      throw error
+    }
+  }
+
+  // Unified deduplicated people dataset (replaces employees+kimper+cards).
+  // Thumbnailed photos and gzip compression make this endpoint several orders
+  // of magnitude lighter than the three legacy endpoints combined.
+  async getPeopleComplete(): Promise<any[]> {
+    if (!(await this.isOnCompanyNetwork())) {
+      throw new Error('Not on company network')
+    }
+
+    try {
+      const baseUrl = await this.getBaseUrl()
+      console.log(`👥 Fetching UNIFIED people data from: ${baseUrl}`)
+
+      const response = await fetch(`${baseUrl}/api/mobile/people/all?photo_size=200`, {
+        method: 'GET',
+        headers: { ...authHeader(), 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate, br' },
+        signal: AbortSignal.timeout(300000)
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server API error: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result.data || []
+    } catch (error) {
+      console.error('❌ Complete people data fetch failed:', error)
+      throw error
+    }
+  }
+
   // Submit inspection directly to SQL Server
   async submitInspection(inspectionData: any): Promise<boolean> {
     if (!(await this.isOnCompanyNetwork())) {
@@ -219,7 +363,7 @@ class DirectSQLServerService {
 
       const response = await fetch(`${baseUrl}/api/mobile/inspections`, {
         method: 'POST',
-        headers: {
+        headers: { ...authHeader(),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(inspectionData),

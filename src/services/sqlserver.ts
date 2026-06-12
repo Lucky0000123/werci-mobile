@@ -1,4 +1,4 @@
-// Direct SQL Server connection for WERCI mobile app
+// Direct SQL Server connection for PRISM mobile app
 // This replaces the IndexedDB + API sync approach with direct database access
 
 import { apiFetch } from './api'
@@ -18,6 +18,7 @@ interface Inspection {
   id?: number
   vehicle_id?: number
   vehicle_equip_no?: string
+  create_service_request?: boolean
   inspection_date: string
   inspector_name: string
   inspection_type: string
@@ -42,17 +43,7 @@ class SQLServerService {
   private isConnected = false
 
   constructor() {
-    // Use same SQL Server as web app
-    /*
-    this.config = {
-      server: '10.40.20.184', // Your SQL Server IP
-      database: 'Safety', // Your database name
-      username: 'Rahul', // Your username
-      password: 'Radhaswami@4', // Your password
-      port: 1434,
-      trustServerCertificate: true
-    }
-    */
+    // Mobile app communicates via backend API - no direct DB credentials needed
   }
 
   async connect(): Promise<boolean> {
@@ -82,6 +73,9 @@ class SQLServerService {
       // Get authentication token
       const authService = AuthService.getInstance()
       const token = await authService.getToken()
+      if (!token) {
+        throw new Error('LOGIN_REQUIRED')
+      }
 
       // Map mobile app fields to database fields with proper vehicle identification
       const inspectionData = {
@@ -101,6 +95,7 @@ class SQLServerService {
         body_condition: inspection.body_condition, // Maps to body_condition in DB
         interior_condition: inspection.interior_condition, // Maps to interior_condition in DB
         star_rating: inspection.star_rating,
+        create_service_request: inspection.create_service_request === true,
         gps_latitude: inspection.gps_latitude || null,
         gps_longitude: inspection.gps_longitude || null
       }
@@ -116,6 +111,9 @@ class SQLServerService {
         console.warn('🔁 401 Unauthorized on create_inspection, refreshing token...')
         await authService.refreshToken()
         const newToken = await authService.getToken()
+        if (!newToken) {
+          throw new Error('LOGIN_REQUIRED')
+        }
         response = await apiFetch('/api/mobile/inspections', {
           method: 'POST',
           body: JSON.stringify(inspectionData)
@@ -166,6 +164,9 @@ class SQLServerService {
       const { AuthService } = await import('./auth')
       const authService = AuthService.getInstance()
       let token = await authService.getToken()
+      if (!token) {
+        throw new Error('LOGIN_REQUIRED')
+      }
 
       let response = await apiFetch('/api/mobile/photos', { method: 'POST', body: formData }, { token })
 
@@ -173,6 +174,9 @@ class SQLServerService {
         console.warn('🔁 401 on photo upload, refreshing token...')
         await authService.refreshToken()
         token = await authService.getToken()
+        if (!token) {
+          throw new Error('LOGIN_REQUIRED')
+        }
         response = await apiFetch('/api/mobile/photos', { method: 'POST', body: formData }, { token })
       }
 
@@ -218,15 +222,22 @@ class SQLServerService {
 
   async getAllInspections(): Promise<Inspection[]> {
     try {
-      // Use centralized API service (no authentication required)
-      const response = await apiFetch('/api/mobile/inspections', { method: 'GET' })
+      const { AuthService } = await import('./auth')
+      const authService = AuthService.getInstance()
+      const token = await authService.getToken()
+
+      if (!token) {
+        return []
+      }
+
+      const response = await apiFetch('/api/mobile/inspections', { method: 'GET' }, { token })
 
       if (!response.ok) {
         return []
       }
 
-      const result = await response.json()
-      return result.success ? result.data : []
+      const result = await response.json().catch(() => null) as { success?: boolean; data?: Inspection[] } | null
+      return result?.success && Array.isArray(result.data) ? result.data : []
     } catch (error) {
       console.error('Failed to get inspections:', error)
       return []

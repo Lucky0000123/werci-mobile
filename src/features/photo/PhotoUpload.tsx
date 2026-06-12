@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { useRef, useState } from 'react'
+import InlineQRScanner from '../../components/InlineQRScanner'
 import { connectionManager } from '../../services/connectionManager'
+import { ensureNativeCameraPermission, openNativeAppSettings } from '../../services/cameraAccess'
 
 interface Vehicle {
   id: number
@@ -22,42 +23,21 @@ export default function PhotoUpload() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<{type: 'success' | 'error', message: string} | null>(null)
+  const photoPermissionClickReady = useRef(false)
 
-  async function scanQRCode() {
-    try {
-      setIsScanning(true)
-      setScanError('')
-      setUploadStatus(null)
+  // Open the inline QR scanner modal (web-based getUserMedia + zxing).
+  // Replaces @capacitor-community/barcode-scanner which crashed on Android 14+.
+  function scanQRCode() {
+    setScanError('')
+    setUploadStatus(null)
+    setIsScanning(true)
+  }
 
-      // Check camera permission
-      const status = await BarcodeScanner.checkPermission({ force: true })
-      if (!status.granted) {
-        setScanError('Camera permission denied')
-        setIsScanning(false)
-        return
-      }
-
-      // Hide background and start scanning
-      await BarcodeScanner.hideBackground()
-      document.body.classList.add('qr-scanning')
-
-      const result = await BarcodeScanner.startScan()
-
-      // Cleanup
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
-      setIsScanning(false)
-
-      if (result.hasContent && result.content) {
-        console.log('🔍 QR Code scanned:', result.content)
-        await processQRCode(result.content)
-      }
-    } catch (error) {
-      console.error('❌ QR scanning error:', error)
-      setScanError('Failed to scan QR code: ' + (error as Error).message)
-      setIsScanning(false)
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
+  async function handleScanResult(content: string) {
+    setIsScanning(false)
+    if (content) {
+      console.log('🔍 QR Code scanned:', content)
+      await processQRCode(content)
     }
   }
 
@@ -145,6 +125,25 @@ export default function PhotoUpload() {
     }
   }
 
+  async function handlePhotoInputClick(event: React.MouseEvent<HTMLInputElement>) {
+    if (photoPermissionClickReady.current) {
+      photoPermissionClickReady.current = false
+      return
+    }
+
+    event.preventDefault()
+    const input = event.currentTarget
+    const allowed = await ensureNativeCameraPermission()
+    if (!allowed) {
+      setUploadStatus({ type: 'error', message: 'Camera permission denied. Enable camera permission in Android app settings.' })
+      await openNativeAppSettings()
+      return
+    }
+
+    photoPermissionClickReady.current = true
+    input.click()
+  }
+
   async function uploadPhoto() {
     if (!selectedPhoto || !vehicle || !qrToken) {
       setUploadStatus({type: 'error', message: 'Missing photo, vehicle, or authentication token'})
@@ -213,6 +212,14 @@ export default function PhotoUpload() {
 
   return (
     <div style={{ padding: '20px' }}>
+      {/* Inline QR scanner overlay (replaces legacy native plugin). */}
+      {isScanning && (
+        <InlineQRScanner
+          onResult={handleScanResult}
+          onClose={() => setIsScanning(false)}
+        />
+      )}
+
       <h2 style={{ marginBottom: '20px', color: '#333' }}>📸 Upload Equipment Picture</h2>
 
       {!vehicle && (
@@ -300,6 +307,7 @@ export default function PhotoUpload() {
               type="file"
               accept="image/*"
               capture="environment"
+              onClick={handlePhotoInputClick}
               onChange={handlePhotoSelect}
               style={{
                 width: '100%',

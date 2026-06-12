@@ -7,6 +7,7 @@ import App from './App.tsx'
 import { defineCustomElements } from '@ionic/pwa-elements/loader'
 defineCustomElements(window)
 
+// I18nProvider is already provided inside App (wraps the Router)
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

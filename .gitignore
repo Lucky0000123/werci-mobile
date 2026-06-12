@@ -72,3 +72,11 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# Signing keys + secrets — never commit
+*.jks
+*.keystore
+.env.backup
+
+# Release archives
+*.zip

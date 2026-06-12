@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep the app-owned Capacitor permission bridge stable if release minification
+# is re-enabled later. Permission callbacks are resolved by method name.
+-keep class com.prism.inspector.PrismPermissionsPlugin { *; }
+-keepclassmembers class com.prism.inspector.PrismPermissionsPlugin { *; }

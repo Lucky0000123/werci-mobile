@@ -1,4 +1,9 @@
 // Connection Manager with Network Mode Detection and Testing
+import { App as CapacitorApp } from '@capacitor/app'
+
+// Read endpoints from environment variables (set in .env / .env.production)
+const _LOCAL_URL = import.meta.env.VITE_LOCAL_BASE || 'http://10.40.20.184:8082'
+const _CLOUD_URL = import.meta.env.VITE_CLOUD_BASE || 'https://api.werci.my.id'
 export interface ConnectionStatus {
   isOnline: boolean
   currentMode: 'cloud' | 'local' | 'offline'
@@ -30,13 +35,13 @@ class ConnectionManager {
   private endpoints: NetworkEndpoint[] = [
     {
       name: 'IWIP NETWORK',
-      url: 'http://10.40.20.184:8082',
+      url: _LOCAL_URL,
       type: 'local',
       priority: 2 // Local company network
     },
     {
       name: 'REMOTE SERVER',
-      url: 'http://159.65.13.232:5000',
+      url: _CLOUD_URL,
       type: 'cloud',
       priority: 1 // Cloud server (correct port)
     }
@@ -46,8 +51,21 @@ class ConnectionManager {
   private checkInterval: NodeJS.Timeout | null = null
 
   constructor() {
-    this.startPeriodicCheck()
+    // Do NOT auto-start network checks in constructor.
+    // This runs at module import time and blocks the app startup
+    // if endpoints are unreachable (5s timeout × 2 endpoints).
+    // Call init() explicitly after the UI has rendered.
+  }
+
+  /** Call once after UI is visible to start connectivity monitoring */
+  init() {
     this.setupNetworkListener()
+    // Run first check quickly (500ms) so API calls don't fail due to null endpoint
+    setTimeout(() => this.checkConnectivity(), 500)
+    // Periodic checks every 30s after that
+    this.checkInterval = setInterval(() => {
+      this.checkConnectivity()
+    }, 30000)
   }
 
   // Add status change listener
@@ -71,8 +89,11 @@ class ConnectionManager {
     })
   }
 
-  // Test individual endpoint connectivity
-  private async testEndpoint(endpoint: NetworkEndpoint, timeoutMs = 5000): Promise<{ available: boolean, responseTime?: number, statusCode?: number, error?: string }> {
+  // Test individual endpoint connectivity.
+  // 4s timeout: a /health endpoint that can't answer in 4s is effectively down
+  // for a mobile user, and a shorter timeout keeps startup/failover snappy
+  // (the old 8s made the app feel frozen for up to 8s when off-LAN).
+  private async testEndpoint(endpoint: NetworkEndpoint, timeoutMs = 4000): Promise<{ available: boolean, responseTime?: number, statusCode?: number, error?: string }> {
     const startTime = Date.now()
 
     try {
@@ -95,11 +116,13 @@ class ConnectionManager {
       }
     } catch (err) {
       let responseTime = Date.now() - startTime
-      const error = err as any
-      const message = error?.message || String(error)
+      const message = err instanceof Error ? err.message : String(err)
       console.warn(`Endpoint ${endpoint.name} test failed:`, message)
 
-      // Fallback: try opaque fetch to detect basic reachability when CORS blocks the request
+      // Fallback: try opaque fetch to detect basic reachability when CORS blocks the request.
+      // NOTE: an opaque response gives us *zero* information about HTTP status,
+      // so we must NOT mark the endpoint as available — doing so causes false
+      // positives where the app thinks it's online but every API call fails.
       try {
         const controller2 = new AbortController()
         const timeoutId2 = setTimeout(() => controller2.abort(), Math.max(1000, Math.floor(timeoutMs / 2)))
@@ -112,12 +135,12 @@ class ConnectionManager {
         clearTimeout(timeoutId2)
         responseTime = Date.now() - startTime
         return {
-          available: true,
+          available: false,
           responseTime,
           statusCode: 0,
-          error: 'CORS blocked (opaque), but host reachable'
+          error: 'CORS blocked — host may be reachable but API is unavailable'
         }
-      } catch (opaqueErr) {
+      } catch {
         responseTime = Date.now() - startTime
         return {
           available: false,
@@ -263,18 +286,21 @@ class ConnectionManager {
         this.notifyListeners()
       })
     }
+
+    // Re-probe connectivity when app returns to foreground
+    try {
+      CapacitorApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          console.log('📱 App returned to foreground — rechecking connectivity')
+          this.checkConnectivity()
+        }
+      })
+    } catch (e) {
+      console.warn('Could not add appStateChange listener:', e)
+    }
   }
 
-  // Start periodic connectivity checks
-  private startPeriodicCheck() {
-    // Initial check
-    this.checkConnectivity()
-    
-    // Check every 30 seconds
-    this.checkInterval = setInterval(() => {
-      this.checkConnectivity()
-    }, 30000)
-  }
+  // startPeriodicCheck is now handled by init() — called after UI renders
 
   // Stop periodic checks
   stopPeriodicCheck() {

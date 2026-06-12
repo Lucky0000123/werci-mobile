@@ -1,9 +1,42 @@
-// IndexedDB wrapper using idb for WERCK mobile
+// IndexedDB wrapper using idb for PRISM mobile
 // Schema v1: inspections, photos, syncQueue, users
-import { openDB } from 'idb'
+import { openDB, deleteDB } from 'idb'
 import type { DBSchema, IDBPDatabase } from 'idb'
 
-interface WerckDB extends DBSchema {
+const PRISM_DB_NAME = 'prism-mobile'
+const PRISM_DB_VERSION = 1
+
+// Classify IDB errors that usually mean the underlying LevelDB store is corrupted
+// (common on Chromium/Windows after a crash or partial storage wipe).
+// For these, we wipe and recreate the DB instead of propagating the error.
+function isRecoverableIdbError(err: unknown): boolean {
+  if (!err) return false
+  const e = err as { name?: string; message?: string }
+  const name = e.name || ''
+  const msg  = e.message || String(err)
+  return (
+    name === 'UnknownError' ||
+    name === 'InvalidStateError' ||
+    name === 'NotFoundError' ||
+    /internal error/i.test(msg) ||
+    /backing store/i.test(msg)
+  )
+}
+
+export interface StoredUserSession {
+  deviceId: string
+  token: string
+  lastSync?: number
+  validUntil?: number
+  isTemporary?: boolean
+  userId?: number
+  username?: string
+  role?: string
+  fullName?: string
+  authenticatedAt?: number
+}
+
+interface PrismDB extends DBSchema {
   inspections: {
     key: string // inspectionId
     value: {
@@ -29,6 +62,7 @@ interface WerckDB extends DBSchema {
       // GPS coordinates
       gpsLatitude?: number
       gpsLongitude?: number
+      createServiceRequest?: boolean
       pendingSync?: boolean
     }
     indexes: { 'by-updatedAt': number }
@@ -61,48 +95,73 @@ interface WerckDB extends DBSchema {
   }
   users: {
     key: string // deviceId
-    value: {
-      deviceId: string
-      token: string
-      lastSync?: number
-      validUntil?: number
-      isTemporary?: boolean
-    }
+    value: StoredUserSession
   }
 }
 
-let dbPromise: Promise<IDBPDatabase<WerckDB>> | null = null
+let dbPromise: Promise<IDBPDatabase<PrismDB>> | null = null
 
-export function getDB() {
-  if (!dbPromise) {
-    dbPromise = openDB<WerckDB>('werck-mobile', 1, {
-      upgrade(db) {
+function openPrismDB(): Promise<IDBPDatabase<PrismDB>> {
+  return openDB<PrismDB>(PRISM_DB_NAME, PRISM_DB_VERSION, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains('inspections')) {
         const insp = db.createObjectStore('inspections', { keyPath: 'id' })
         insp.createIndex('by-updatedAt', 'updatedAt')
+      }
+      if (!db.objectStoreNames.contains('photos')) {
         const photos = db.createObjectStore('photos', { keyPath: 'id' })
         photos.createIndex('by-inspectionId', 'inspectionId')
+      }
+      if (!db.objectStoreNames.contains('syncQueue')) {
         const queue = db.createObjectStore('syncQueue', { keyPath: 'id' })
         queue.createIndex('by-priority', 'priority')
+      }
+      if (!db.objectStoreNames.contains('users')) {
         db.createObjectStore('users', { keyPath: 'deviceId' })
-      },
-    })
-  }
-  return dbPromise!
+      }
+    },
+    blocked()        { console.warn('[IDB] prism-mobile open blocked by other tab') },
+    blocking()       { console.warn('[IDB] prism-mobile blocking newer open; closing') },
+    terminated()     { console.warn('[IDB] prism-mobile connection terminated'); dbPromise = null }
+  })
 }
 
-export async function enqueue(item: Omit<WerckDB['syncQueue']['value'], 'id' | 'retries' | 'createdAt'>) {
+export function getDB(): Promise<IDBPDatabase<PrismDB>> {
+  if (!dbPromise) {
+    dbPromise = openPrismDB().catch(async (err) => {
+      dbPromise = null
+      if (isRecoverableIdbError(err)) {
+        console.warn(`[IDB] ${PRISM_DB_NAME} open failed (${(err as Error).name}); wiping and retrying once…`, err)
+        try {
+          await deleteDB(PRISM_DB_NAME)
+          const db = await openPrismDB()
+          console.info(`[IDB] ${PRISM_DB_NAME} successfully recreated after wipe`)
+          dbPromise = Promise.resolve(db)
+          return db
+        } catch (retryErr) {
+          console.error(`[IDB] ${PRISM_DB_NAME} unrecoverable after wipe`, retryErr)
+          throw retryErr
+        }
+      }
+      throw err
+    })
+  }
+  return dbPromise
+}
+
+export async function enqueue(item: Omit<PrismDB['syncQueue']['value'], 'id' | 'retries' | 'createdAt'>) {
   const id = crypto.randomUUID()
   const db = await getDB()
   await db.add('syncQueue', { id, ...item, retries: 0, createdAt: Date.now() })
   return id
 }
 
-export async function setInspection(v: WerckDB['inspections']['value']) {
+export async function setInspection(v: PrismDB['inspections']['value']) {
   const db = await getDB()
   await db.put('inspections', v)
 }
 
-export async function addPhoto(v: WerckDB['photos']['value']) {
+export async function addPhoto(v: PrismDB['photos']['value']) {
   const db = await getDB()
   await db.put('photos', v)
 }
@@ -122,5 +181,5 @@ export async function clearAllData(): Promise<void> {
   }
 }
 
-export type { WerckDB }
+export type { PrismDB }
 

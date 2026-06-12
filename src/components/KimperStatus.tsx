@@ -1,4 +1,5 @@
 // KimperStatus component for mobile KIMPER QR scanning
+import DeviationHistory from '../features/deviation/DeviationHistory'
 
 interface KimperStatusProps {
   kimper: {
@@ -15,6 +16,9 @@ interface KimperStatusProps {
     police_license_expired_date?: string
     mcu_expire_date?: string
     status?: string
+    card_type_code?: string
+    photo?: string  // base64 encoded photo
+    // All 20 units
     unit_1?: string
     unit_2?: string
     unit_3?: string
@@ -23,11 +27,45 @@ interface KimperStatusProps {
     unit_6?: string
     unit_7?: string
     unit_8?: string
+    unit_9?: string
+    unit_10?: string
+    unit_11?: string
+    unit_12?: string
+    unit_13?: string
+    unit_14?: string
+    unit_15?: string
+    unit_16?: string
+    unit_17?: string
+    unit_18?: string
+    unit_19?: string
+    unit_20?: string
+    // All 20 unit codes (F, T, L, RA)
+    unit_1_code?: string
+    unit_2_code?: string
+    unit_3_code?: string
+    unit_4_code?: string
+    unit_5_code?: string
+    unit_6_code?: string
+    unit_7_code?: string
+    unit_8_code?: string
+    unit_9_code?: string
+    unit_10_code?: string
+    unit_11_code?: string
+    unit_12_code?: string
+    unit_13_code?: string
+    unit_14_code?: string
+    unit_15_code?: string
+    unit_16_code?: string
+    unit_17_code?: string
+    unit_18_code?: string
+    unit_19_code?: string
+    unit_20_code?: string
   }
   onClose: () => void
+  onReportDeviation?: () => void
 }
 
-export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
+export default function KimperStatus({ kimper, onClose, onReportDeviation }: KimperStatusProps) {
   
   // Calculate days until expiry
   const getDaysInfo = (expiryDate?: string) => {
@@ -111,23 +149,68 @@ export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
     }
   }
 
-  // Get authorized units
-  const getAuthorizedUnits = () => {
-    const units = [
-      kimper.unit_1,
-      kimper.unit_2,
-      kimper.unit_3,
-      kimper.unit_4,
-      kimper.unit_5,
-      kimper.unit_6,
-      kimper.unit_7,
-      kimper.unit_8
-    ].filter(u => u && u.trim())
-    
-    return units.length > 0 ? units : null
+  // Group units by access level code (F, T, L, RA)
+  // Colors match web app exactly: T=Red, L=Yellowish-green, RA=Blue, F=Green
+  const getUnitGroups = () => {
+    const groups: {
+      [key: string]: {
+        name: string
+        icon: string
+        color: string
+        gradient: string
+        headerColor: string
+        units: string[]
+      }
+    } = {
+      'F': {
+        name: 'Full Access Units',
+        icon: '✅',
+        color: '#10b981',
+        gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+        headerColor: '#065f46',
+        units: []
+      },
+      'T': {
+        name: 'Temporary Access Units',
+        icon: '⏰',
+        color: '#ef4444',
+        gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+        headerColor: '#991b1b',
+        units: []
+      },
+      'L': {
+        name: 'Learning Units',
+        icon: '🎓',
+        color: '#84cc16',
+        gradient: 'linear-gradient(135deg, #84cc16 0%, #65a30d 100%)',
+        headerColor: '#3f6212',
+        units: []
+      },
+      'RA': {
+        name: 'Restricted Area Units',
+        icon: '⚠️',
+        color: '#3b82f6',
+        gradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+        headerColor: '#1e3a8a',
+        units: []
+      }
+    }
+
+    // Collect all 20 units with their codes
+    for (let i = 1; i <= 20; i++) {
+      const unit = kimper[`unit_${i}` as keyof typeof kimper] as string | undefined
+      const code = kimper[`unit_${i}_code` as keyof typeof kimper] as string | undefined
+
+      if (unit && unit.trim() && code && groups[code]) {
+        groups[code].units.push(unit.trim())
+      }
+    }
+
+    return groups
   }
 
-  const authorizedUnits = getAuthorizedUnits()
+  const unitGroups = getUnitGroups()
+  const totalUnits = Object.values(unitGroups).reduce((sum, group) => sum + group.units.length, 0)
 
   return (
     <div style={{
@@ -152,7 +235,7 @@ export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
         overflow: 'auto',
         boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
       }}>
-        {/* Header */}
+        {/* Header with Photo */}
         <div style={{
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           color: 'white',
@@ -160,9 +243,57 @@ export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
           borderRadius: '20px 20px 0 0',
           textAlign: 'center'
         }}>
-          <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>👤</div>
-          <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>KIMPER Card</h2>
-          <p style={{ margin: 0, opacity: 0.9, fontSize: '0.9rem' }}>Company Driving Permit</p>
+          {/* Employee Photo */}
+          {kimper.photo ? (
+            <img
+              src={`data:image/jpeg;base64,${kimper.photo}`}
+              alt={kimper.name}
+              style={{
+                width: '120px',
+                height: '120px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '4px solid white',
+                marginBottom: '15px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              }}
+            />
+          ) : (
+            <div style={{
+              width: '120px',
+              height: '120px',
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.2)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '3rem',
+              marginBottom: '15px',
+              border: '4px solid white'
+            }}>
+              👤
+            </div>
+          )}
+          <h2 style={{ margin: '0 0 5px 0', fontSize: '1.5rem' }}>{kimper.name}</h2>
+          <p style={{ margin: 0, opacity: 0.9, fontSize: '0.9rem' }}>
+            {kimper.id_number ? `ID: ${kimper.id_number}` : 'Company Driving Permit'}
+          </p>
+          {kimper.card_type_code && (
+            <div style={{
+              display: 'inline-block',
+              background: 'rgba(255,255,255,0.3)',
+              padding: '6px 14px',
+              borderRadius: '20px',
+              fontSize: '0.85rem',
+              marginTop: '10px',
+              fontWeight: 'bold'
+            }}>
+              {kimper.card_type_code === 'T' && '⏰ Temporary'}
+              {kimper.card_type_code === 'L' && '🎓 Learning'}
+              {kimper.card_type_code === 'RA' && '⚠️ Restricted Area'}
+              {kimper.card_type_code === 'F' && '✅ Full Access'}
+            </div>
+          )}
         </div>
 
         {/* Content */}
@@ -216,129 +347,220 @@ export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
             )}
           </div>
 
-          {/* Details Grid */}
+          {/* Employee Information Section - Matching Web App Layout */}
           <div style={{
-            display: 'grid',
-            gap: '15px',
-            marginBottom: '20px'
+            background: 'white',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
           }}>
-            {/* Registration Date */}
-            {kimper.date && (
-              <div style={{
-                background: '#e7f3ff',
-                padding: '15px',
-                borderRadius: '12px',
-                border: '1px solid #b3d9ff'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#0056b3', marginBottom: '5px' }}>
-                  📅 Registration Date
-                </div>
-                <div style={{ fontWeight: '600', color: '#0056b3' }}>
-                  {formatDate(kimper.date)}
-                </div>
-              </div>
-            )}
+            <h5 style={{
+              marginBottom: '15px',
+              fontWeight: 'bold',
+              color: '#333',
+              fontSize: '1rem'
+            }}>
+              ℹ️ Employee Information
+            </h5>
 
-            {/* Company & Department */}
-            {(kimper.company || kimper.department) && (
-              <div style={{
-                background: '#f8f9fa',
-                padding: '15px',
-                borderRadius: '12px'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#6c757d', marginBottom: '5px' }}>
-                  🏢 Organization
-                </div>
-                <div style={{ fontWeight: '600', color: '#333' }}>
-                  {kimper.company || 'N/A'}
-                  {kimper.department && ` - ${kimper.department}`}
-                </div>
+            {/* Department */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 0',
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <div style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>
+                Department
               </div>
-            )}
+              <div style={{ color: '#212529', fontSize: '0.9rem', textAlign: 'right' }}>
+                {kimper.department || '-'}
+              </div>
+            </div>
+
+            {/* Company */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 0',
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <div style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>
+                Company
+              </div>
+              <div style={{ color: '#212529', fontSize: '0.9rem', textAlign: 'right' }}>
+                {kimper.company || '-'}
+              </div>
+            </div>
 
             {/* KIMPER Expiry */}
-            {kimper.kimper_expired_date && (
-              <div style={{
-                background: '#fff3cd',
-                padding: '15px',
-                borderRadius: '12px',
-                border: '1px solid #ffc107'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#856404', marginBottom: '5px' }}>
-                  ⏰ KIMPER Expiry Date
-                </div>
-                <div style={{ fontWeight: '600', color: '#856404' }}>
-                  {formatDate(kimper.kimper_expired_date)}
-                </div>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 0',
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <div style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>
+                KIMPER Expiry
               </div>
-            )}
+              <div style={{ color: '#212529', fontSize: '0.9rem', textAlign: 'right' }}>
+                {kimper.kimper_expired_date ? formatDate(kimper.kimper_expired_date) : '-'}
+              </div>
+            </div>
 
-            {/* License Info */}
-            {(kimper.police_license_type || kimper.police_license_category) && (
-              <div style={{
-                background: '#f8f9fa',
-                padding: '15px',
-                borderRadius: '12px'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#6c757d', marginBottom: '5px' }}>
-                  🪪 License Information
-                </div>
-                <div style={{ fontWeight: '600', color: '#333' }}>
-                  {kimper.police_license_type && `Type: ${kimper.police_license_type}`}
-                  {kimper.police_license_category && ` | Category: ${kimper.police_license_category}`}
-                </div>
-                {kimper.police_license_expired_date && (
-                  <div style={{ fontSize: '0.85rem', color: '#6c757d', marginTop: '5px' }}>
-                    Expires: {formatDate(kimper.police_license_expired_date)}
-                  </div>
-                )}
+            {/* Police License */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '0.75rem 0'
+            }}>
+              <div style={{ fontWeight: '600', color: '#495057', fontSize: '0.9rem' }}>
+                Police License
               </div>
-            )}
-
-            {/* MCU Expiry */}
-            {kimper.mcu_expire_date && (
-              <div style={{
-                background: '#f8f9fa',
-                padding: '15px',
-                borderRadius: '12px'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#6c757d', marginBottom: '5px' }}>
-                  🏥 Medical Check-Up Expiry
-                </div>
-                <div style={{ fontWeight: '600', color: '#333' }}>
-                  {formatDate(kimper.mcu_expire_date)}
-                </div>
+              <div style={{ color: '#212529', fontSize: '0.9rem', textAlign: 'right' }}>
+                {kimper.police_license_type || '-'}
               </div>
-            )}
-
-            {/* Authorized Units */}
-            {authorizedUnits && (
-              <div style={{
-                background: '#e7f3ff',
-                padding: '15px',
-                borderRadius: '12px',
-                border: '1px solid #b3d9ff'
-              }}>
-                <div style={{ fontSize: '0.85rem', color: '#0056b3', marginBottom: '8px', fontWeight: '600' }}>
-                  🚜 Authorized Equipment
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {authorizedUnits.map((unit, idx) => (
-                    <span key={idx} style={{
-                      background: 'white',
-                      padding: '4px 10px',
-                      borderRadius: '12px',
-                      fontSize: '0.8rem',
-                      color: '#0056b3',
-                      border: '1px solid #b3d9ff'
-                    }}>
-                      {unit}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+            </div>
           </div>
+
+            {/* Authorized Equipment - Grouped by Access Level */}
+            <div style={{
+              background: '#f8f9fa',
+              padding: '15px',
+              borderRadius: '12px',
+              marginBottom: '15px'
+            }}>
+              <div style={{
+                fontSize: '0.95rem',
+                color: '#333',
+                marginBottom: '12px',
+                fontWeight: '700',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                🚜 Authorized Equipment
+                <span style={{
+                  background: '#6c757d',
+                  color: 'white',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  fontSize: '0.75rem',
+                  fontWeight: 'bold'
+                }}>
+                  {totalUnits}
+                </span>
+              </div>
+
+              {totalUnits > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {/* Display groups in order: F, T, L, RA */}
+                  {['F', 'T', 'L', 'RA'].map(code => {
+                    const group = unitGroups[code]
+                    if (group.units.length === 0) return null
+
+                    return (
+                      <div key={code} style={{
+                        background: 'white',
+                        padding: '12px',
+                        borderRadius: '10px',
+                        borderLeft: `4px solid ${group.color}`
+                      }}>
+                        <div style={{
+                          fontSize: '0.85rem',
+                          color: group.headerColor,
+                          marginBottom: '8px',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <span>{group.icon}</span>
+                          <span>{group.name} ({code})</span>
+                          <span style={{
+                            background: group.color,
+                            color: 'white',
+                            padding: '2px 6px',
+                            borderRadius: '8px',
+                            fontSize: '0.7rem',
+                            marginLeft: 'auto'
+                          }}>
+                            {group.units.length}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {group.units.map((unit, idx) => (
+                            <span key={idx} style={{
+                              background: group.gradient,
+                              color: 'white',
+                              padding: '5px 10px',
+                              borderRadius: '8px',
+                              fontSize: '0.75rem',
+                              fontWeight: '600',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                            }}>
+                              {unit}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div style={{
+                  textAlign: 'center',
+                  padding: '20px',
+                  color: '#6c757d',
+                  fontSize: '0.9rem'
+                }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '8px' }}>ℹ️</div>
+                  No authorized equipment assigned
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Deviation History Section */}
+          {kimper.id && <DeviationHistory kimperId={kimper.id} />}
+
+          {/* Report Deviation Button */}
+          {onReportDeviation && (
+            <button
+              onClick={onReportDeviation}
+              style={{
+                width: '100%',
+                background: 'linear-gradient(135deg, #F44336, #E91E63)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '15px',
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                marginBottom: '10px',
+                boxShadow: '0 4px 12px rgba(244, 67, 54, 0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #E53935, #D81B60)'
+                e.currentTarget.style.transform = 'translateY(-2px)'
+                e.currentTarget.style.boxShadow = '0 6px 16px rgba(244, 67, 54, 0.4)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, #F44336, #E91E63)'
+                e.currentTarget.style.transform = 'translateY(0)'
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(244, 67, 54, 0.3)'
+              }}
+            >
+              🚩 Report Deviation
+            </button>
+          )}
 
           {/* Close Button */}
           <button
@@ -372,7 +594,6 @@ export default function KimperStatus({ kimper, onClose }: KimperStatusProps) {
             textAlign: 'center'
           }}>
             📱 This is the mobile KIMPER card view. Ensure all permits are valid before operating equipment.
-          </div>
         </div>
       </div>
     </div>

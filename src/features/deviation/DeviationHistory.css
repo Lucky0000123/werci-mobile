@@ -1,0 +1,108 @@
+.deviation-history {
+  padding: 1.5rem;
+  border-top: 2px solid #f0f0f0;
+  margin-top: 1rem;
+}
+
+.deviation-history h5 {
+  color: #667eea;
+  margin-bottom: 1rem;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+.deviation-history h5 i {
+  margin-right: 0.5rem;
+}
+
+.clean-record {
+  text-align: center;
+  padding: 2rem;
+  color: #4CAF50;
+}
+
+.clean-record i {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+.clean-record-text strong {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 0.5rem;
+}
+
+.clean-record-text small {
+  color: #666;
+  font-size: 14px;
+}
+
+.deviation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.deviation-item {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 4px solid #F44336;
+}
+
+.deviation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.deviation-header strong {
+  color: #333;
+  font-size: 15px;
+}
+
+.status-badge {
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.deviation-location {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 0.5rem;
+}
+
+.deviation-location i {
+  margin-right: 0.25rem;
+}
+
+.deviation-golden-rule {
+  color: #F44336;
+  font-weight: bold;
+  font-size: 13px;
+  margin-bottom: 0.5rem;
+}
+
+.deviation-golden-rule i {
+  margin-right: 0.25rem;
+}
+
+.deviation-description {
+  color: #555;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-muted {
+  color: #666;
+}
+

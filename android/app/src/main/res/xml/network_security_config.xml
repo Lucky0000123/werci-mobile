@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config — allows cleartext (HTTP) traffic to our API servers.
+  Required because androidScheme is 'https' but our backends serve over HTTP.
+-->
+<network-security-config>
+    <!-- Allow cleartext to the company local server -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.40.20.184</domain>
+    </domain-config>
+
+    <!-- Cloud access now goes through https://api.werci.my.id (Cloudflare Tunnel) —
+         no cleartext exception needed because it's HTTPS by default. -->
+
+    <!-- Allow cleartext to localhost / emulator alias -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>
+

@@ -1,14 +1,98 @@
-import { useState, useEffect } from 'react'
-import type { FormEvent } from 'react'
-import { Camera, CameraResultType } from '@capacitor/camera'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { useState, useEffect, useRef } from 'react'
+import type { FormEvent, CSSProperties, ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Geolocation } from '@capacitor/geolocation'
+import InlineQRScanner from '../../components/InlineQRScanner'
 import { compressDataUrl } from '../../services/compress'
+import { ensureNativeCameraPermission, openNativeAppSettings, readImageFileAsDataUrl } from '../../services/cameraAccess'
 import { sqlServerService, type Inspection } from '../../services/sqlserver'
 import { apiFetch } from '../../services/api'
-import offlineStorage from '../../services/offlineStorage'
 import { offlineDataSync } from '../../services/offlineDataSync'
 import { setInspection, addPhoto as addPhotoLocal, enqueue } from '../../services/db'
+import { flushAllPending } from '../../services/backgroundSync'
+import { useI18n } from '../../services/i18n-context'
 import './InspectionFormProfessional.css'
+
+// Design tokens shared with the rest of the PRISM mobile UI
+const C = {
+  card: 'rgba(255,255,255,0.04)',
+  cardSolid: 'rgba(15,23,42,0.6)',
+  border: 'rgba(255,255,255,0.09)',
+  borderHover: 'rgba(252,65,0,0.35)',
+  accent: '#FC4100',
+  accentDark: '#d93600',
+  gold: '#FFC55A',
+  success: '#22c55e',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+  textPri: '#f1f5f9',
+  textMut: '#8b9ab0',
+}
+
+// Section wrapper — glass card with a gold eyebrow title
+function Section({ title, children, icon }: { title: string; children: ReactNode; icon?: string }) {
+  return (
+    <div className="prism-card" style={{ padding: '16px', marginBottom: '14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        {icon && <span style={{ fontSize: '0.95rem' }}>{icon}</span>}
+        <h3 style={{ fontSize: '0.78rem', fontWeight: 700, color: C.gold, letterSpacing: '0.08em', textTransform: 'uppercase', margin: 0 }}>{title}</h3>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// Field label + input layout with mobile-friendly spacing
+function FieldLabel({ children, required, htmlFor }: { children: ReactNode; required?: boolean; htmlFor?: string }) {
+  return (
+    <label htmlFor={htmlFor} style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: C.textMut, marginBottom: '6px', letterSpacing: '0.02em' }}>
+      {children}{required && <span style={{ color: C.accent, marginLeft: '4px' }}>*</span>}
+    </label>
+  )
+}
+
+// Shared dark input style (min 48px touch target)
+const inputStyle: CSSProperties = {
+  width: '100%',
+  padding: '12px 14px',
+  background: 'rgba(255,255,255,0.03)',
+  border: `1px solid ${C.border}`,
+  borderRadius: '10px',
+  color: C.textPri,
+  fontSize: '0.95rem',
+  minHeight: '48px',
+  outline: 'none',
+  boxSizing: 'border-box',
+  fontFamily: 'inherit',
+}
+
+// Segmented button for Good/Fair/Poor style selections
+interface SegOpt { value: string; label: string; tone: 'success' | 'warning' | 'danger' }
+function Segmented({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: SegOpt[] }) {
+  const toneBg: Record<string, string> = { success: C.success, warning: C.warning, danger: C.danger }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${options.length}, 1fr)`, gap: '8px' }}>
+      {options.map(opt => {
+        const active = value === opt.value
+        return (
+          <button key={opt.value} type="button" onClick={() => onChange(opt.value)} style={{
+            padding: '12px 10px',
+            background: active ? toneBg[opt.tone] : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${active ? toneBg[opt.tone] : C.border}`,
+            borderRadius: '10px',
+            color: active ? '#fff' : C.textPri,
+            fontSize: '0.88rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            minHeight: '48px',
+            transition: 'all 0.15s ease',
+            letterSpacing: '0.02em',
+          }}>{opt.label}</button>
+        )
+      })}
+    </div>
+  )
+}
 
 function statusFromStars(stars: number): 'FAILED' | 'MODERATE' | 'PASS' {
   if (stars <= 2) return 'FAILED'
@@ -26,9 +110,15 @@ interface InspectionFormProps {
     commissioning_status?: string
     expired_date?: string
   } | null
+  onShowToast?: (type: 'success' | 'error' | 'warning' | 'info', message: string) => void
 }
 
-export default function InspectionForm({ scannedVehicle }: InspectionFormProps = {}) {
+export default function InspectionForm({ scannedVehicle, onShowToast }: InspectionFormProps = {}) {
+  const { t } = useI18n()
+  const navigate = useNavigate()
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
+  const showToast = onShowToast ?? ((_type: string, msg: string) => alert(msg))
+  const [isSubmitting, setIsSubmitting] = useState(false)
   // Form data matching original Bootstrap template
   const [inspectorName, setInspectorName] = useState('')
   const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().split('T')[0])
@@ -51,7 +141,13 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
   const [photos, setPhotos] = useState<{ id: string; preview: string; ratio: number }[]>([])
   const [gpsLatitude, setGpsLatitude] = useState<number | null>(null)
   const [gpsLongitude, setGpsLongitude] = useState<number | null>(null)
-  const [locationName, setLocationName] = useState('') // Reserved for future GPS location feature
+  const [locationName, setLocationName] = useState('')
+
+  useEffect(() => {
+    if (!['poor', 'critical'].includes(overallCondition) && createServiceRequest) {
+      setCreateServiceRequest(false)
+    }
+  }, [overallCondition, createServiceRequest])
 
   // KIMPER-specific state
   const [kimperDetails, setKimperDetails] = useState<any>(null)
@@ -76,7 +172,7 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
       // Scroll any scrollable containers to top
       const containers = [
         document.querySelector('.professional-inspection-form'),
-        document.querySelector('.werci-container'),
+        document.querySelector('.prism-container'),
         document.body,
         document.documentElement
       ]
@@ -111,17 +207,27 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
     }
   }
 
-  // Photo capture
+  // Photo capture uses Android's camera/file picker instead of the native
+  // Capacitor Camera plugin. This is more stable on Samsung/Android 14+ and
+  // prevents a native plugin crash from killing the whole app.
   async function addPhoto() {
-    try {
-      const img = await Camera.getPhoto({
-        resultType: CameraResultType.DataUrl,
-        quality: 90,
-        allowEditing: false
-      })
-      if (!img.dataUrl) return
+    const allowed = await ensureNativeCameraPermission()
+    if (!allowed) {
+      showToast('error', 'Camera permission denied. Enable camera permission in Android app settings.')
+      await openNativeAppSettings()
+      return
+    }
+    photoInputRef.current?.click()
+  }
 
-      const { dataUrl, compressionRatio } = await compressDataUrl(img.dataUrl, 0.75)
+  async function handlePhotoFileSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    try {
+      const rawDataUrl = await readImageFileAsDataUrl(file)
+      const { dataUrl, compressionRatio } = await compressDataUrl(rawDataUrl, 0.75)
       const newPhoto = {
         id: crypto.randomUUID(),
         preview: dataUrl,
@@ -130,8 +236,8 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
 
       setPhotos(prev => [...prev, newPhoto])
     } catch (error) {
-      console.error('Camera error:', error)
-      alert('Camera access failed. Please check permissions.')
+      console.error('Photo selection error:', error)
+      showToast('error', 'Photo capture failed. Please try again.')
     }
   }
 
@@ -139,62 +245,68 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
     setPhotos(prev => prev.filter(p => p.id !== photoId))
   }
 
-  // GPS Location capture
+  // GPS Location capture using native Capacitor Geolocation
   async function getCurrentLocation() {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by this browser.')
-      return
-    }
+    try {
+      // Check and request location permissions first
+      const check = await Geolocation.checkPermissions()
+      console.log('Location permission check:', check)
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setGpsLatitude(position.coords.latitude)
-        setGpsLongitude(position.coords.longitude)
-        setLocationName(`${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`)
-      },
-      (error) => {
-        console.error('Location error:', error)
-        alert('Unable to get location. Please check permissions.')
+      let locationPerm = check.location
+      if (locationPerm !== 'granted') {
+        const permission = await Geolocation.requestPermissions()
+        console.log('Location permission request result:', permission)
+        locationPerm = permission.location
       }
-    )
+
+      if (locationPerm !== 'granted') {
+        showToast('error', 'Location permission is required. Please enable it in settings.')
+        return
+      }
+
+      let position
+      try {
+        // Try high accuracy (GPS) first with shorter timeout
+        position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 8000 })
+      } catch (gpsError) {
+        console.warn('GPS high accuracy failed, falling back to network location:', gpsError)
+        // Fallback to network/cell tower location — much more reliable
+        position = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 })
+      }
+
+      setGpsLatitude(position.coords.latitude)
+      setGpsLongitude(position.coords.longitude)
+      // Only overwrite the manual label if it's empty — preserve anything the
+      // inspector typed (e.g. "Warehouse A") while still capturing coords.
+      setLocationName((prev) =>
+        prev.trim() ? prev : `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`
+      )
+    } catch (error) {
+      console.error('Location error:', error)
+      const errorMsg = (error as Error).message || String(error)
+      if (errorMsg.includes('permission') || errorMsg.includes('denied')) {
+        showToast('error', 'Location permission denied. Please enable location access in app settings.')
+      } else {
+        showToast('error', 'Unable to get location: ' + errorMsg)
+      }
+    }
   }
 
 
 
-  async function scanQRCode() {
-    try {
-      setIsScanning(true)
-      setScanError('')
+  // Open the inline QR scanner modal. The modal handles getUserMedia + zxing
+  // decoding and calls back via onResult. This replaces the unmaintained
+  // @capacitor-community/barcode-scanner plugin which crashed on Android 14+.
+  function scanQRCode() {
+    setScanError('')
+    setIsScanning(true)
+  }
 
-      // Check camera permission
-      const status = await BarcodeScanner.checkPermission({ force: true })
-      if (!status.granted) {
-        setScanError('Camera permission denied')
-        setIsScanning(false)
-        return
-      }
-
-      // Hide background and start scanning
-      await BarcodeScanner.hideBackground()
-      document.body.classList.add('qr-scanning')
-
-      const result = await BarcodeScanner.startScan()
-
-      // Cleanup
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
-      setIsScanning(false)
-
-      if (result.hasContent && result.content) {
-        console.log('🔍 QR Code scanned:', result.content)
-        await processQRCode(result.content)
-      }
-    } catch (error) {
-      console.error('❌ QR scan error:', error)
-      setScanError('QR scan failed: ' + (error as Error).message)
-      setIsScanning(false)
-      document.body.classList.remove('qr-scanning')
-      await BarcodeScanner.showBackground()
+  async function handleScanResult(content: string) {
+    setIsScanning(false)
+    if (content) {
+      console.log('🔍 QR Code scanned:', content)
+      await processQRCode(content)
     }
   }
 
@@ -217,6 +329,35 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
 
       // Handle Equipment/Vehicle QR codes
       setIsKimperScan(false)
+
+      // Token-format sticker: /inspect/t/<token> (current default). Resolve the
+      // token to a vehicle, then reuse the equip_no lookup so all UI state fills.
+      // Must run BEFORE the legacy /inspect/<id> branch (token URLs also contain
+      // "/inspect/").
+      const tokenMatch = qrContent.match(/\/inspect\/t\/([^/?#]+)/)
+      if (tokenMatch) {
+        const token = decodeURIComponent(tokenMatch[1])
+        let v = await offlineDataSync.lookupVehicleByToken(token)
+        if (!v) {
+          try {
+            const resp = await apiFetch(`/api/mobile/vehicles/by-token/${encodeURIComponent(token)}`, { method: 'GET' })
+            if (resp.ok) {
+              const result = await resp.json()
+              if (result.success && result.vehicle) v = result.vehicle
+            }
+          } catch (e) {
+            console.warn('⚠️ Token vehicle lookup failed:', e)
+          }
+        }
+        if (v?.equip_no) {
+          setEquipmentNumber(v.equip_no)
+          await lookupVehicleDetails(v.equip_no)
+        } else {
+          setScanError('Vehicle not found for this QR code')
+        }
+        return
+      }
+
       let equipNo = qrContent
 
       // Handle different QR code formats
@@ -247,8 +388,8 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
       console.log('👤 Looking up KIMPER details for ID:', kimperId)
       setScanError('')
 
-      // Try to fetch KIMPER data from server
-      const response = await apiFetch(`/kimper/qr/${kimperId}`, {
+      // Use the mobile JSON API endpoint (not the web HTML page /kimper/qr/{id})
+      const response = await apiFetch(`/api/mobile/kimper/${kimperId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -256,38 +397,17 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
       })
 
       if (response.ok) {
-        // Check if it's HTML (web view) or JSON (API response)
-        const contentType = response.headers.get('content-type')
+        const data = await response.json()
+        console.log('✅ KIMPER data:', data)
+        setKimperDetails(data)
 
-        if (contentType && contentType.includes('application/json')) {
-          const data = await response.json()
-          console.log('✅ KIMPER data (JSON):', data)
-          setKimperDetails(data)
-
-          // Auto-fill inspector name from KIMPER data
-          if (data.name) {
-            setInspectorName(data.name)
-            console.log('✅ Inspector name set to:', data.name)
-          }
-
-          setScanError('')
-        } else {
-          // HTML response - parse it to extract KIMPER data
-          const html = await response.text()
-          console.log('📄 KIMPER HTML response received')
-
-          // Try to extract KIMPER name from HTML
-          const nameMatch = html.match(/<h2[^>]*>([^<]+)<\/h2>/)
-          if (nameMatch && nameMatch[1]) {
-            const kimperName = nameMatch[1].trim()
-            setInspectorName(kimperName)
-            setKimperDetails({ name: kimperName, id: kimperId })
-            console.log('✅ KIMPER name extracted from HTML:', kimperName)
-            setScanError('')
-          } else {
-            setScanError('KIMPER data found but could not extract name')
-          }
+        // Auto-fill inspector name from KIMPER data
+        if (data.name) {
+          setInspectorName(data.name)
+          console.log('✅ Inspector name set to:', data.name)
         }
+
+        setScanError('')
       } else {
         console.error('❌ KIMPER lookup failed:', response.status)
         setScanError(`KIMPER not found (ID: ${kimperId})`)
@@ -324,19 +444,7 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
         return
       }
 
-      // 2) Fallback to legacy offline cache
-      const cached = await offlineStorage.getVehicleByEquipNo(normalized)
-      if (cached) {
-        console.log('📦 Using legacy offline cached vehicle')
-        setVehicleDetails(cached)
-        setScanError('')
-        if (cached.description) {
-          setNotes(`Equipment: ${cached.description} (${cached.equip_no})`)
-        }
-        return
-      }
-
-      // 3) Use centralized API with intelligent failover (cloud/local/dev)
+      // 2) Use centralized API with intelligent failover (cloud/local/dev)
       const response = await apiFetch(`/api/mobile/vehicles/qr/${encodeURIComponent(normalized)}`, {
         method: 'GET',
         headers: {
@@ -382,38 +490,37 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
   async function submit() {
     // Validation
     if (!inspectorName.trim()) {
-      alert('Please enter Inspector Name')
+      showToast('warning', t('requiredFieldMissing'))
       return
     }
     if (!overallCondition) {
-      alert('Please select Overall Vehicle Condition')
+      showToast('warning', t('requiredFieldMissing'))
       return
     }
 
+    setIsSubmitting(true)
+    const starRating = calculateStarRating()
+    const status = statusFromStars(starRating)
+    const shouldCreateServiceRequest = createServiceRequest && starRating <= 2
+
+    // Prepend the manual location to notes so it's persisted alongside the
+    // inspection (the `inspections` table has gps_latitude/gps_longitude but
+    // no dedicated location_name column).
+    const trimmedLocation = locationName.trim()
+    const notesWithLocation = trimmedLocation
+      ? (notes.trim() ? `📍 ${trimmedLocation}\n${notes}` : `📍 ${trimmedLocation}`)
+      : notes
+
     try {
-      // Calculate star rating from overall condition
-      const getStarRating = (condition: string): number => {
-        switch (condition) {
-          case 'excellent': return 5
-          case 'good': return 4
-          case 'fair': return 3
-          case 'poor': return 2
-          case 'critical': return 1
-          default: return 0
-        }
-      }
-
-      const starRating = getStarRating(overallCondition)
-      const status = statusFromStars(starRating)
-
       // Create inspection object for SQL Server
       const inspection: Inspection = {
         vehicle_equip_no: equipmentNumber || 'MOBILE_SCAN',
+        create_service_request: shouldCreateServiceRequest,
         inspection_date: inspectionDate,
         inspector_name: inspectorName.trim(),
         inspection_type: 'Mobile Vehicle Inspection',
         status: status,
-        notes: notes,
+        notes: notesWithLocation,
         odometer_reading: odometerReading ? parseInt(odometerReading) : undefined,
         tire_condition: tireCondition,
         brake_condition: brakeCondition,
@@ -456,8 +563,12 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
           }
         }
 
-        alert(`✅ Inspection saved to database!\n\nOverall Rating: ${starRating}/5 stars (${overallCondition})\nStatus: ${status}\nPhotos: ${totalPhotos}`)
+        showToast('success', `${t('inspectionSaved')} · ${starRating}/5 · ${status} · ${totalPhotos} 📷`)
         resetForm()
+        setIsSubmitting(false)
+        // Close the inspection screen and return to the dashboard after the
+        // toast has had a moment to register (keeps the success feedback visible).
+        setTimeout(() => navigate('/home'), 1200)
       } else {
         throw new Error('Failed to save inspection')
       }
@@ -467,16 +578,6 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
 
       // Offline-first fallback: persist to IndexedDB and enqueue for background sync
       const localId = crypto.randomUUID()
-      const starRating = ((): number => {
-        switch (overallCondition) {
-          case 'excellent': return 5
-          case 'good': return 4
-          case 'fair': return 3
-          case 'poor': return 2
-          case 'critical': return 1
-          default: return 0
-        }
-      })()
 
       await setInspection({
         id: localId,
@@ -489,7 +590,7 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
         inspectionType: 'Mobile Vehicle Inspection',
         status: statusFromStars(starRating),
         overallStars: (starRating || 0) as 1|2|3|4|5,
-        notes: notes || undefined,
+        notes: notesWithLocation || undefined,
         odometerReading: odometerReading ? parseInt(odometerReading) : undefined,
         tireCondition: tireCondition,
         brakeCondition: brakeCondition,
@@ -499,6 +600,7 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
         bodyInteriorCondition: interiorCondition,
         gpsLatitude: gpsLatitude || undefined,
         gpsLongitude: gpsLongitude || undefined,
+        createServiceRequest: shouldCreateServiceRequest,
         pendingSync: true
       })
 
@@ -521,8 +623,14 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
       // Enqueue the inspection itself
       await enqueue({ kind: 'inspection', refId: localId, priority: 1 })
 
-      alert('✅ Saved offline. Your inspection will auto-sync when back online.')
+      // Trigger immediate sync attempt if network is available
+      flushAllPending().catch(() => {})
+
+      showToast('info', t('inspectionSavedOffline'))
       resetForm()
+      setIsSubmitting(false)
+      // Mirror the online behavior: return to the dashboard after queueing.
+      setTimeout(() => navigate('/home'), 1200)
     }
   }
 
@@ -554,472 +662,251 @@ export default function InspectionForm({ scannedVehicle }: InspectionFormProps =
     setIsScanning(false)
   }
 
+  const submitDisabled = !inspectorName.trim() || !overallCondition || isSubmitting
+
   return (
-    <div className="professional-inspection-form">
-      {/* Mobile Header */}
-      <div className="mobile-header">
-        <div className="container">
-          <h1 className="text-center mb-0">
-            <i className="fas fa-clipboard-check me-2"></i>
-            Mobile Vehicle Inspection
-          </h1>
-        </div>
+    <div style={{ minHeight: '100vh', background: '#050a12', paddingBottom: '32px' }}>
+      {/* Inline QR scanner overlay (replaces the legacy native barcode plugin). */}
+      {isScanning && (
+        <InlineQRScanner
+          onResult={handleScanResult}
+          onClose={() => setIsScanning(false)}
+        />
+      )}
+
+      {/* Sticky header */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'rgba(5,10,18,0.88)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: `1px solid ${C.border}`, padding: '14px 16px' }}>
+        <h1 style={{ fontSize: '1.05rem', fontWeight: 700, color: C.textPri, margin: 0, textAlign: 'center', letterSpacing: '0.02em' }}>📋 {t('vehicleInspection')}</h1>
       </div>
 
-      <div className="container">
-        {/* Vehicle Info */}
-        {vehicleDetails && (
-          <div className="vehicle-info">
-            <h4><i className="fas fa-truck text-success me-2"></i>{vehicleDetails.make} {vehicleDetails.model}</h4>
-            <p className="text-muted mb-0">Equipment: {equipmentNumber}</p>
-          </div>
-        )}
-
-        <div className="form-backdrop">
-          <form onSubmit={handleSubmit}>
-          {/* Equipment Identification */}
-          <div className="form-section">
-            <h5><i className="fas fa-qrcode"></i> Equipment Identification</h5>
-
-            <button
-              type="button"
-              className="btn btn-primary w-100 mb-3"
-              onClick={scanQRCode}
-              disabled={isScanning}
-            >
-              {isScanning ? (
-                <>
-                  <i className="fas fa-spinner fa-spin me-2"></i>
-                  Scanning QR Code...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-qrcode me-2"></i>
-                  Scan Equipment QR Code
-                </>
-              )}
-            </button>
-
-            <div className="input-group">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Or enter equipment number manually"
-                value={equipmentNumber}
-                onChange={(e) => {
-                  const v = e.target.value.toUpperCase().trim();
-                  setEquipmentNumber(v);
-                  // Do not auto-lookup on manual typing; allow direct entry as requested
-                  setScanError('');
-                }}
-              />
-              <button
-                type="button"
-                className="btn btn-outline-primary"
-                onClick={() => equipmentNumber && lookupVehicleDetails(equipmentNumber)}
-                disabled={!equipmentNumber.trim()}
-                title="Look up vehicle details"
-              >
-                🔍 Lookup
-              </button>
+      <div style={{ padding: '16px', maxWidth: '560px', margin: '0 auto' }}>
+        {/* Vehicle summary card (shown when a vehicle was scanned/looked-up) */}
+        {vehicleDetails && (() => {
+          const make = vehicleDetails.make || vehicleDetails.manufacturer || ''
+          const model = vehicleDetails.model || vehicleDetails.unit_model || ''
+          const name = `${make} ${model}`.trim() || vehicleDetails.description || t('fleetVehicle')
+          return (
+            <div className="prism-card" style={{ padding: '14px 16px', marginBottom: '14px', borderColor: 'rgba(252,65,0,0.25)' }}>
+              <div style={{ fontSize: '0.7rem', color: C.gold, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: '6px' }}>{t('vehicleInformation')}</div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: C.textPri }}>{name}</div>
+              <div style={{ fontSize: '0.85rem', color: C.textMut, marginTop: '2px' }}>{t('equipmentNumber')}: <span style={{ color: C.textPri, fontWeight: 600 }}>{equipmentNumber}</span></div>
+              {locationName && <div style={{ fontSize: '0.8rem', color: C.textMut, marginTop: '4px' }}>📍 {locationName}</div>}
             </div>
+          )
+        })()}
 
-            {scanError && (
-              <div className="alert alert-danger mt-2">{scanError}</div>
-            )}
+        <form onSubmit={handleSubmit}>
+          {/* Equipment Identification (only shown when no vehicle was pre-loaded from scan flow) */}
+          {!scannedVehicle && (
+            <Section title={t('equipmentIdentification')} icon="🏷️">
+              <button type="button" onClick={scanQRCode} disabled={isScanning} style={{
+                width: '100%', padding: '14px', marginBottom: '12px',
+                background: isScanning ? 'rgba(252,65,0,0.4)' : `linear-gradient(135deg, ${C.accent}, ${C.accentDark})`,
+                border: 'none', borderRadius: '10px', color: '#fff', fontSize: '0.95rem', fontWeight: 700,
+                minHeight: '52px', cursor: isScanning ? 'not-allowed' : 'pointer', letterSpacing: '0.02em',
+                boxShadow: isScanning ? 'none' : '0 4px 12px rgba(252,65,0,0.25)',
+              }}>
+                {isScanning ? `⏳ ${t('loading')}` : `📷 ${t('scanEquipmentQR')}`}
+              </button>
 
-            {kimperDetails && isKimperScan && (
-              <div className="alert alert-info mt-2">
-                <strong>👤 KIMPER Scanned:</strong> {kimperDetails.name || 'Inspector'}
-                <div className="text-muted small">ID: {kimperDetails.id || 'N/A'}</div>
-                <div className="text-success small mt-1">✓ Inspector name auto-filled</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="text" style={inputStyle} placeholder={t('enterEquipmentNumber')} value={equipmentNumber}
+                  onChange={(e) => { setEquipmentNumber(e.target.value.toUpperCase().trim()); setScanError('') }} />
+                <button type="button" onClick={() => equipmentNumber && lookupVehicleDetails(equipmentNumber)}
+                  disabled={!equipmentNumber.trim()}
+                  style={{ padding: '12px 18px', background: 'rgba(252,65,0,0.15)', border: `1px solid ${C.borderHover}`,
+                    borderRadius: '10px', color: C.accent, fontWeight: 700, minHeight: '48px',
+                    cursor: equipmentNumber.trim() ? 'pointer' : 'not-allowed', opacity: equipmentNumber.trim() ? 1 : 0.5 }}>
+                  🔍
+                </button>
               </div>
-            )}
 
-            {vehicleDetails && !isKimperScan && (
-              <div className="alert alert-success mt-2">
-                <strong>Vehicle Found:</strong> {vehicleDetails.make} {vehicleDetails.model}
-                {locationName && <div className="text-muted small">Location: {locationName}</div>}
-              </div>
-            )}
-          </div>
+              {scanError && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', background: 'rgba(239,68,68,0.12)',
+                  border: `1px solid rgba(239,68,68,0.3)`, borderRadius: '8px', color: '#fca5a5', fontSize: '0.85rem' }}>
+                  ⚠️ {scanError}
+                </div>
+              )}
 
-      {/* Inspector Information */}
-      <div className="form-section" aria-labelledby="inspector-section">
-        <h5 id="inspector-section"><i className="fas fa-user"></i> Inspector Information</h5>
+              {kimperDetails && isKimperScan && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', background: 'rgba(59,130,246,0.1)',
+                  border: `1px solid rgba(59,130,246,0.3)`, borderRadius: '8px', color: '#93c5fd', fontSize: '0.85rem' }}>
+                  <strong>👤 KIMPER:</strong> {kimperDetails.name || 'Inspector'} · ID: {kimperDetails.id || 'N/A'}
+                </div>
+              )}
+            </Section>
+          )}
 
-        <div className="inline-field mb-3">
-          <label className="form-label mb-0" htmlFor="inspector-name">Inspector Name *</label>
-          <input
-            id="inspector-name"
-            className="form-control"
-            type="text"
-            value={inspectorName}
-            onChange={(e) => setInspectorName(e.target.value)}
-            placeholder="Enter your name"
-            required
-          />
-        </div>
-
-        <div className="inline-field mb-3">
-          <label className="form-label mb-0" htmlFor="inspection-date">Inspection Date</label>
-          <input
-            id="inspection-date"
-            className="form-control"
-            type="date"
-            value={inspectionDate}
-            onChange={(e) => setInspectionDate(e.target.value)}
-          />
-        </div>
-
-        <div className="inline-field mb-0">
-          <label className="form-label mb-0" htmlFor="odometer">Odometer / Hours Reading</label>
-          <input
-            id="odometer"
-            className="form-control"
-            type="number"
-            value={odometerReading}
-            onChange={(e) => setOdometerReading(e.target.value)}
-            placeholder="Enter current reading"
-            inputMode="numeric"
-          />
-        </div>
-      </div>
+          {/* Inspector Information */}
+          <Section title={t('inspectorInformation')} icon="👤">
+            <div style={{ marginBottom: '14px' }}>
+              <FieldLabel required htmlFor="inspector-name">{t('inspectorName')}</FieldLabel>
+              <input id="inspector-name" type="text" style={inputStyle} value={inspectorName}
+                onChange={(e) => setInspectorName(e.target.value)} placeholder={t('inspectorNamePlaceholder')} required />
+            </div>
+            <div style={{ marginBottom: '14px' }}>
+              <FieldLabel htmlFor="inspection-date">{t('inspectionDate')}</FieldLabel>
+              <input id="inspection-date" type="date" style={inputStyle} value={inspectionDate}
+                onChange={(e) => setInspectionDate(e.target.value)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="odometer">{t('odometerHours')}</FieldLabel>
+              <input id="odometer" type="number" inputMode="numeric" style={inputStyle} value={odometerReading}
+                onChange={(e) => setOdometerReading(e.target.value)} placeholder={t('odometerPlaceholder')} />
+            </div>
+          </Section>
 
           {/* Component Assessment */}
-          <div className="form-section">
-            <h5><i className="fas fa-tools"></i> Component Assessment</h5>
-            <p className="text-muted">Rate each component individually</p>
-            <small className="text-muted"><i className="fas fa-info-circle"></i> These individual ratings contribute to the star rating calculation but don't trigger service requests directly.</small>
-
-            {/* Brakes */}
-            <div className="mb-4">
-              <label className="form-label"><i className="fas fa-stop-circle text-danger"></i> Brakes</label>
-              <div className="btn-group w-100 segmented-3" role="group">
-                <button
-                  type="button"
-                  className={`btn ${brakeCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
-                  onClick={() => setBrakeCondition('good')}
-                >
-                  Good
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${brakeCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
-                  onClick={() => setBrakeCondition('fair')}
-                >
-                  Fair
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${brakeCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
-                  onClick={() => setBrakeCondition('poor')}
-                >
-                  Poor
-                </button>
+          <Section title={t('componentAssessment')} icon="🛠️">
+            <p style={{ fontSize: '0.82rem', color: C.textMut, margin: '0 0 14px 0' }}>{t('rateComponents')}</p>
+            {([
+              { label: t('brakes'),       icon: '🛑', value: brakeCondition,    set: setBrakeCondition },
+              { label: t('tires'),        icon: '⚫', value: tireCondition,     set: setTireCondition },
+              { label: t('engine'),       icon: '⚙️', value: engineCondition,   set: setEngineCondition },
+              { label: t('bodyExterior'), icon: '🚚', value: bodyCondition,     set: setBodyCondition },
+              { label: t('bodyInterior'), icon: '🪑', value: interiorCondition, set: setInteriorCondition },
+            ]).map(c => (
+              <div key={c.label} style={{ marginBottom: '14px' }}>
+                <FieldLabel>{c.icon} {c.label}</FieldLabel>
+                <Segmented value={c.value} onChange={(v) => c.set(v)} options={[
+                  { value: 'good', label: t('conditionGood'), tone: 'success' },
+                  { value: 'fair', label: t('conditionFair'), tone: 'warning' },
+                  { value: 'poor', label: t('conditionPoor'), tone: 'danger' },
+                ]} />
               </div>
-            </div>
-
-            {/* Tires */}
-            <div className="mb-4">
-              <label className="form-label"><i className="fas fa-circle text-dark"></i> Tires</label>
-              <div className="btn-group w-100 segmented-3" role="group">
-                <button
-                  type="button"
-                  className={`btn ${tireCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
-                  onClick={() => setTireCondition('good')}
-                >
-                  Good
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${tireCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
-                  onClick={() => setTireCondition('fair')}
-                >
-                  Fair
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${tireCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
-                  onClick={() => setTireCondition('poor')}
-                >
-                  Poor
-                </button>
-              </div>
-            </div>
-
-            {/* Engine */}
-            <div className="mb-4">
-              <label className="form-label"><i className="fas fa-cog text-primary"></i> Engine</label>
-              <div className="btn-group w-100 segmented-3" role="group">
-                <button
-                  type="button"
-                  className={`btn ${engineCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
-                  onClick={() => setEngineCondition('good')}
-                >
-                  Good
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${engineCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
-                  onClick={() => setEngineCondition('fair')}
-                >
-                  Fair
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${engineCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
-                  onClick={() => setEngineCondition('poor')}
-                >
-                  Poor
-                </button>
-              </div>
-            </div>
-
-            {/* Body Exterior */}
-            <div className="mb-4">
-              <label className="form-label"><i className="fas fa-truck text-secondary"></i> Body Exterior</label>
-              <div className="btn-group w-100 segmented-3" role="group">
-                <button
-                  type="button"
-                  className={`btn ${bodyCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
-                  onClick={() => setBodyCondition('good')}
-                >
-                  Good
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${bodyCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
-                  onClick={() => setBodyCondition('fair')}
-                >
-                  Fair
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${bodyCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
-                  onClick={() => setBodyCondition('poor')}
-                >
-                  Poor
-                </button>
-              </div>
-            </div>
-
-            {/* Body Interior */}
-            <div className="mb-4">
-              <label className="form-label"><i className="fas fa-chair text-info"></i> Body Interior</label>
-              <div className="btn-group w-100 segmented-3" role="group">
-                <button
-                  type="button"
-                  className={`btn ${interiorCondition === 'good' ? 'btn-success' : 'btn-outline-success'}`}
-                  onClick={() => setInteriorCondition('good')}
-                >
-                  Good
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${interiorCondition === 'fair' ? 'btn-warning' : 'btn-outline-warning'}`}
-                  onClick={() => setInteriorCondition('fair')}
-                >
-                  Fair
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${interiorCondition === 'poor' ? 'btn-danger' : 'btn-outline-danger'}`}
-                  onClick={() => setInteriorCondition('poor')}
-                >
-                  Poor
-                </button>
-              </div>
-            </div>
-          </div>
+            ))}
+          </Section>
 
           {/* Lights Check */}
-          <div className="form-section">
-            <h5><i className="fas fa-lightbulb text-warning"></i> Lights Check</h5>
-            <p>Are all lights working properly?</p>
-
-            <div className="btn-group w-100" role="group">
-              <button
-                type="button"
-                className={`btn ${lightsWorking === 'yes' ? 'btn-success' : 'btn-outline-success'}`}
-                onClick={() => setLightsWorking('yes')}
-              >
-                <i className="fas fa-check"></i> Yes
-              </button>
-              <button
-                type="button"
-                className={`btn ${lightsWorking === 'no' ? 'btn-danger' : 'btn-outline-danger'}`}
-                onClick={() => setLightsWorking('no')}
-              >
-                <i className="fas fa-times"></i> No
-              </button>
-            </div>
-          </div>
+          <Section title={t('lightsCheck')} icon="💡">
+            <p style={{ fontSize: '0.85rem', color: C.textMut, margin: '0 0 12px 0' }}>{t('lightsWorking')}</p>
+            <Segmented value={lightsWorking} onChange={(v) => setLightsWorking(v)} options={[
+              { value: 'yes', label: `✓ ${t('yes')}`, tone: 'success' },
+              { value: 'no',  label: `✕ ${t('no')}`,  tone: 'danger'  },
+            ]} />
+          </Section>
 
           {/* Overall Vehicle Condition */}
-          <div className="form-section">
-            <h5><i className="fas fa-star text-warning"></i> Overall Vehicle Condition *</h5>
-            <p className="text-muted">This determines the final star rating and inspection status</p>
-
-            <div className="rating-list" role="group">
-              <button
-                type="button"
-                aria-pressed={overallCondition === 'excellent'}
-                className={`choice-row ${overallCondition === 'excellent' ? 'active' : ''}`}
-                onClick={() => setOverallCondition('excellent')}
-              >
-                Excellent (5 stars)
-              </button>
-              <button
-                type="button"
-                aria-pressed={overallCondition === 'good'}
-                className={`choice-row ${overallCondition === 'good' ? 'active' : ''}`}
-                onClick={() => setOverallCondition('good')}
-              >
-                Good (4 stars)
-              </button>
-              <button
-                type="button"
-                aria-pressed={overallCondition === 'fair'}
-                className={`choice-row ${overallCondition === 'fair' ? 'active' : ''}`}
-                onClick={() => setOverallCondition('fair')}
-              >
-                Fair (3 stars)
-              </button>
-              <button
-                type="button"
-                aria-pressed={overallCondition === 'poor'}
-                className={`choice-row ${overallCondition === 'poor' ? 'active' : ''}`}
-                onClick={() => setOverallCondition('poor')}
-              >
-                Poor (2 stars)
-              </button>
-              <button
-                type="button"
-                aria-pressed={overallCondition === 'critical'}
-                className={`choice-row ${overallCondition === 'critical' ? 'active' : ''}`}
-                onClick={() => setOverallCondition('critical')}
-              >
-                Critical (1 star)
-              </button>
+          <Section title={`${t('overallCondition')} *`} icon="⭐">
+            <p style={{ fontSize: '0.82rem', color: C.textMut, margin: '0 0 12px 0' }}>{t('overallConditionDesc')}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {([
+                { value: 'excellent', label: t('excellent'),     stars: 5 },
+                { value: 'good',      label: t('good'),          stars: 4 },
+                { value: 'fair',      label: t('fair'),          stars: 3 },
+                { value: 'poor',      label: t('poor'),          stars: 2 },
+                { value: 'critical',  label: t('critical'),      stars: 1 },
+              ]).map(o => {
+                const active = overallCondition === o.value
+                return (
+                  <button key={o.value} type="button" aria-pressed={active}
+                    aria-label={`${o.label} (${o.stars} star${o.stars === 1 ? '' : 's'})`}
+                    onClick={() => setOverallCondition(o.value)} style={{
+                    padding: '14px 16px', minHeight: '52px',
+                    background: active ? 'linear-gradient(135deg, rgba(252,65,0,0.22), rgba(252,65,0,0.06))' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${active ? C.accent : C.border}`, borderRadius: '10px',
+                    color: C.textPri, fontSize: '0.92rem', fontWeight: 600, cursor: 'pointer',
+                    textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    transition: 'all 0.15s ease',
+                  }}>
+                    <span>{o.label}</span>
+                    <span style={{ color: C.gold, letterSpacing: '1px', fontSize: '0.85rem' }}>{'★'.repeat(o.stars)}{'☆'.repeat(5 - o.stars)}</span>
+                  </button>
+                )
+              })}
             </div>
 
-            {/* Star Rating Display */}
-            {overallCondition && (
-              <div className="alert alert-info mt-3">
-                <strong>Current Rating:</strong> {calculateStarRating()} stars
-              </div>
-            )}
-
-            {/* Service Request (shown immediately after Overall Condition) */}
             {(overallCondition === 'poor' || overallCondition === 'critical') && (
-              <div className="mt-3">
-                <div className="alert alert-warning mb-3">
-                  <i className="fas fa-exclamation-triangle me-2"></i>
-                  Overall condition is {overallCondition === 'poor' ? 'Poor (2 stars)' : 'Critical (1 star)'}. Do you want to create a service request?
-                </div>
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    id="serviceRequestTop"
-                    checked={createServiceRequest}
+              <div style={{ marginTop: '14px', padding: '12px 14px', background: 'rgba(245,158,11,0.1)',
+                border: `1px solid rgba(245,158,11,0.3)`, borderRadius: '10px' }}>
+                <div style={{ fontSize: '0.85rem', color: '#fbbf24', marginBottom: '10px' }}>⚠️ {t('serviceRequestPrompt')}</div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', minHeight: '44px' }}>
+                  <input type="checkbox" id="serviceRequestTop" checked={createServiceRequest}
                     onChange={(e) => setCreateServiceRequest(e.target.checked)}
-                  />
-                  <label className="form-check-label" htmlFor="serviceRequestTop">
-                    <i className="fas fa-wrench me-2"></i>
-                    Create Service Request
-                  </label>
-                </div>
+                    style={{ width: '20px', height: '20px', accentColor: C.accent, cursor: 'pointer' }} />
+                  <span style={{ color: C.textPri, fontWeight: 600, fontSize: '0.9rem' }}>🔧 {t('createServiceRequest')}</span>
+                </label>
               </div>
             )}
-
-          </div>
+          </Section>
 
           {/* Additional Notes */}
-          <div className="form-section">
-            <h5><i className="fas fa-sticky-note"></i> Additional Notes</h5>
+          <Section title={t('additionalNotes')} icon="📝">
+            <textarea rows={4} style={{ ...inputStyle, minHeight: '100px', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('notesPlaceholder')} />
+          </Section>
 
-            <div className="inline-field mb-3">
-              <label className="form-label mb-0">Inspection Notes</label>
-              <textarea
-                className="form-control"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Enter any additional observations or comments..."
-              />
-            </div>
-
-
-          </div>
-
-          {/* Photo Upload */}
-          <div className="form-section">
-            <h5><i className="fas fa-camera"></i> Inspection Photos</h5>
-
-            <button
-              type="button"
-              className="btn btn-outline-primary w-100 mb-3"
-              onClick={addPhoto}
-            >
-              <i className="fas fa-camera me-2"></i>
-              Add Photo
-            </button>
-
+          {/* Photos */}
+          <Section title={t('inspectionPhotos')} icon="📷">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handlePhotoFileSelected}
+              style={{ display: 'none' }}
+            />
+            <button type="button" onClick={addPhoto} style={{
+              width: '100%', padding: '14px', marginBottom: photos.length > 0 ? '12px' : 0,
+              background: 'rgba(255,255,255,0.03)', border: `1px dashed ${C.borderHover}`, borderRadius: '10px',
+              color: C.accent, fontSize: '0.9rem', fontWeight: 700, minHeight: '52px', cursor: 'pointer',
+            }}>📷 {t('takePhoto')}</button>
             {photos.length > 0 && (
-              <div className="photo-grid">
-                {photos.map((photo) => (
-                  <div key={photo.id} className="photo-item">
-                    <img src={photo.preview} alt="Inspection" className="img-thumbnail" />
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-danger photo-remove"
-                      onClick={() => removePhoto(photo.id)}
-                    >
-                      <i className="fas fa-times"></i>
-                    </button>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: '8px' }}>
+                {photos.map(photo => (
+                  <div key={photo.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', border: `1px solid ${C.border}` }}>
+                    <img src={photo.preview} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    <button type="button" onClick={() => removePhoto(photo.id)} style={{
+                      position: 'absolute', top: '4px', right: '4px', width: '26px', height: '26px',
+                      background: 'rgba(239,68,68,0.9)', border: 'none', borderRadius: '50%', color: '#fff',
+                      fontSize: '0.75rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>✕</button>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Section>
 
           {/* GPS Location */}
-          <div className="form-section">
-            <h5><i className="fas fa-map-marker-alt"></i> Location</h5>
+          <Section title={t('gpsLocation')} icon="📍">
+            <button type="button" onClick={getCurrentLocation} style={{
+              width: '100%', padding: '14px', marginBottom: '10px',
+              background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: '10px',
+              color: C.textPri, fontSize: '0.9rem', fontWeight: 600, minHeight: '52px', cursor: 'pointer',
+            }}>📍 {t('getCurrentLocation')}</button>
 
-            <button
-              type="button"
-              className="btn btn-outline-secondary w-100 mb-3"
-              onClick={getCurrentLocation}
-            >
-              <i className="fas fa-crosshairs me-2"></i>
-              Get Current Location
-            </button>
+            <FieldLabel htmlFor="location-name">{t('locationNameLabel')}</FieldLabel>
+            <input
+              id="location-name"
+              type="text"
+              value={locationName}
+              onChange={(e) => setLocationName(e.target.value)}
+              placeholder={t('locationNamePlaceholder')}
+              style={inputStyle}
+            />
 
             {(gpsLatitude && gpsLongitude) && (
-              <div className="alert alert-success">
-                <i className="fas fa-check-circle me-2"></i>
-                Location captured: {gpsLatitude.toFixed(6)}, {gpsLongitude.toFixed(6)}
+              <div style={{ marginTop: '10px', padding: '10px 12px', background: 'rgba(34,197,94,0.1)',
+                border: `1px solid rgba(34,197,94,0.3)`, borderRadius: '8px', color: '#86efac', fontSize: '0.85rem' }}>
+                ✓ {t('locationCaptured')}: {gpsLatitude.toFixed(6)}, {gpsLongitude.toFixed(6)}
               </div>
             )}
-          </div>
+          </Section>
 
-
-          {/* Submit Button */}
-          <div className="form-section">
-            <button
-              type="submit"
-              className="btn btn-success btn-lg w-100"
-              disabled={!inspectorName.trim() || !overallCondition}
-            >
-              <i className="fas fa-check-circle me-2"></i>
-              Submit Inspection
-            </button>
-          </div>
+          {/* Submit */}
+          <button type="submit" disabled={submitDisabled} style={{
+            width: '100%', padding: '16px', marginTop: '8px',
+            background: submitDisabled ? 'rgba(255,255,255,0.05)' : `linear-gradient(135deg, ${C.accent}, ${C.accentDark})`,
+            border: 'none', borderRadius: '12px', color: submitDisabled ? C.textMut : '#fff',
+            fontSize: '1rem', fontWeight: 800, minHeight: '56px',
+            cursor: submitDisabled ? 'not-allowed' : 'pointer',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            boxShadow: submitDisabled ? 'none' : '0 6px 18px rgba(252,65,0,0.32)',
+            transition: 'all 0.2s ease',
+          }}>
+            {isSubmitting ? `⏳ ${t('submitting')}` : `✓ ${t('submitInspection')}`}
+          </button>
         </form>
-        </div>
       </div>
     </div>
   )

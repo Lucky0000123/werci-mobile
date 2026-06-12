@@ -1,7 +1,7 @@
-// Comprehensive offline-first sync service for WERCK mobile app
+// Comprehensive offline-first sync service for PRISM mobile app
 import { getDB } from './db'
 import { apiFetch } from './api'
-// import type { WerckDB } from './db'
+// import type { PrismDB } from './db'
 
 export interface SyncStatus {
   isOnline: boolean
@@ -11,7 +11,26 @@ export interface SyncStatus {
   failedItems: number
 }
 
-class SyncService {
+// Persist lastSync outside IndexedDB so it survives even when the IDB users
+// store cannot be opened (enterprise browser profiles / extensions often break IDB).
+const LAST_SYNC_KEY = 'prism_last_sync_v1'
+
+function readLastSync(): number | null {
+  try {
+    const raw = localStorage.getItem(LAST_SYNC_KEY)
+    if (!raw) return null
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function writeLastSync(ts: number): void {
+  try { localStorage.setItem(LAST_SYNC_KEY, String(ts)) } catch { /* noop */ }
+}
+
+export class SyncService {
   private isOnline = navigator.onLine
   private isSyncing = false
   private syncInterval: number | null = null
@@ -55,20 +74,24 @@ class SyncService {
   }
 
   async getStatus(): Promise<SyncStatus> {
-    const db = await getDB()
-    const queueItems = await db.getAll('syncQueue')
-    const failedItems = queueItems.filter(item => item.retries >= 3)
-    
-    // Get last sync time from users store
-    const users = await db.getAll('users')
-    const lastSync = users.length > 0 ? users[0].lastSync || null : null
+    let pendingItems = 0
+    let failedItems = 0
+    try {
+      const db = await getDB()
+      const queueItems = await db.getAll('syncQueue')
+      pendingItems = queueItems.length
+      failedItems = queueItems.filter(item => item.retries >= 3).length
+    } catch (error) {
+      // IDB may be unavailable (locked browser profile). Queue counts fall back to 0.
+      console.warn('[sync] Unable to read sync queue from IDB', error)
+    }
 
     return {
       isOnline: this.isOnline,
       isSyncing: this.isSyncing,
-      lastSync,
-      pendingItems: queueItems.length,
-      failedItems: failedItems.length
+      lastSync: readLastSync(),
+      pendingItems,
+      failedItems
     }
   }
 
@@ -88,6 +111,28 @@ class SyncService {
     }
   }
 
+  private isFailedQueueItem(item: { retries?: number }) {
+    return (item.retries || 0) >= 3
+  }
+
+  private async resolveSyncToken(forceRefresh = false): Promise<string | null> {
+    const { AuthService } = await import('./auth')
+    const authService = AuthService.getInstance()
+
+    if (!forceRefresh) {
+      const cached = await authService.getToken()
+      if (cached) return cached
+    }
+
+    try {
+      await authService.refreshToken()
+    } catch (error) {
+      console.warn('⚠️ Unable to refresh sync token:', error)
+    }
+
+    return authService.getToken()
+  }
+
   async startSync(): Promise<void> {
     if (!this.isOnline || this.isSyncing) return
 
@@ -96,16 +141,10 @@ class SyncService {
 
     try {
       await this.processSyncQueue()
-      
-      // Update last sync time
-      const db = await getDB()
-      const users = await db.getAll('users')
-      if (users.length > 0) {
-        const user = users[0]
-        user.lastSync = Date.now()
-        await db.put('users', user)
-      }
-      
+
+      // Persist last sync time in localStorage (IDB-independent).
+      writeLastSync(Date.now())
+
     } catch (error) {
       console.error('Sync failed:', error)
     } finally {
@@ -122,6 +161,10 @@ class SyncService {
     queueItems.sort((a, b) => a.priority - b.priority)
 
     for (const item of queueItems) {
+      if (this.isFailedQueueItem(item)) {
+        continue
+      }
+
       try {
         if (item.kind === 'inspection') {
           await this.syncInspection(item.refId)
@@ -134,13 +177,18 @@ class SyncService {
         
       } catch (error) {
         console.error(`Failed to sync ${item.kind} ${item.refId}:`, error)
-        
-        // Increment retry count
-        item.retries = (item.retries || 0) + 1
-        
-        if (item.retries >= 3) {
-          console.warn(`Max retries reached for ${item.kind} ${item.refId}`)
-          // Keep in queue but mark as failed
+
+        if (error instanceof Error && error.message === 'SYNC_AUTH_UNAVAILABLE') {
+          item.retries = Math.max(item.retries || 0, 3)
+          console.warn(`Paused ${item.kind} ${item.refId} until device authentication is available`)
+        } else {
+          // Increment retry count
+          item.retries = (item.retries || 0) + 1
+
+          if (this.isFailedQueueItem(item)) {
+            console.warn(`Max retries reached for ${item.kind} ${item.refId}`)
+            // Keep in queue but mark as failed
+          }
         }
         
         await db.put('syncQueue', item)
@@ -156,9 +204,10 @@ class SyncService {
       return // Already synced or doesn't exist
     }
 
-    // Get device token for authentication
-    const users = await db.getAll('users')
-    let token = users.length > 0 ? users[0].token : null
+    let token = await this.resolveSyncToken()
+    if (!token) {
+      throw new Error('SYNC_AUTH_UNAVAILABLE')
+    }
 
     // Prepare inspection data for API (map mobile fields to web app fields)
     const inspectionData = {
@@ -180,6 +229,7 @@ class SyncService {
       interior_condition: inspection.bodyInteriorCondition, // Map body_interior to interior_condition
       // Overall rating
       star_rating: inspection.overallStars,
+      create_service_request: inspection.createServiceRequest === true,
       // GPS coordinates
       gps_latitude: inspection.gpsLatitude,
       gps_longitude: inspection.gpsLongitude
@@ -189,23 +239,20 @@ class SyncService {
     let response = await apiFetch('/api/mobile/inspections', {
       method: 'POST',
       body: JSON.stringify(inspectionData)
-    }, { token: token || undefined })
+    }, { token })
 
     // If 401, refresh token and retry once
-    if (response.status === 401 && token) {
+    if (response.status === 401) {
       console.warn('🔁 401 during sync, refreshing token...')
-      const { AuthService } = await import('./auth')
-      const authService = AuthService.getInstance()
-      await authService.refreshToken()
-
-      // Get fresh token from DB
-      const updatedUsers = await db.getAll('users')
-      token = updatedUsers.length > 0 ? updatedUsers[0].token : null
+      token = await this.resolveSyncToken(true)
+      if (!token) {
+        throw new Error('SYNC_AUTH_UNAVAILABLE')
+      }
 
       response = await apiFetch('/api/mobile/inspections', {
         method: 'POST',
         body: JSON.stringify(inspectionData)
-      }, { token: token || undefined })
+      }, { token })
     }
 
     if (!response.ok) {
@@ -234,9 +281,10 @@ class SyncService {
       return // Already synced or doesn't exist
     }
 
-    // Get device token for authentication
-    const users = await db.getAll('users')
-    let token = users.length > 0 ? users[0].token : null
+    let token = await this.resolveSyncToken()
+    if (!token) {
+      throw new Error('SYNC_AUTH_UNAVAILABLE')
+    }
 
     // Convert data URL to blob
     const response = await fetch(photo.dataURL)
@@ -252,23 +300,20 @@ class SyncService {
     let apiResponse = await apiFetch('/api/mobile/photos', {
       method: 'POST',
       body: formData
-    }, { token: token || undefined })
+    }, { token })
 
     // If 401, refresh token and retry once
-    if (apiResponse.status === 401 && token) {
+    if (apiResponse.status === 401) {
       console.warn('🔁 401 during photo sync, refreshing token...')
-      const { AuthService } = await import('./auth')
-      const authService = AuthService.getInstance()
-      await authService.refreshToken()
-
-      // Get fresh token from DB
-      const updatedUsers = await db.getAll('users')
-      token = updatedUsers.length > 0 ? updatedUsers[0].token : null
+      token = await this.resolveSyncToken(true)
+      if (!token) {
+        throw new Error('SYNC_AUTH_UNAVAILABLE')
+      }
 
       apiResponse = await apiFetch('/api/mobile/photos', {
         method: 'POST',
         body: formData
-      }, { token: token || undefined })
+      }, { token })
     }
 
     if (!apiResponse.ok) {

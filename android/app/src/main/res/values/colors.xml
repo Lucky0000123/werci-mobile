@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <color name="colorPrimary">#000000</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="colorAccent">#00FF41</color>
+    <color name="prismGreen">#00FF41</color>
+    <color name="prismDark">#050a12</color>
+    <color name="prismBlue">#0066CC</color>
+</resources>

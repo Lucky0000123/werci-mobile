@@ -1,0 +1,478 @@
+/**
+ * PRISM Professional Design System
+ * Weda Bay Nickel KIMPER & Inspection System
+ * Version: 2.0 (PRISM brand)
+ */
+
+:root {
+  --prism-bg: #050a12;
+  --prism-card: rgba(255, 255, 255, 0.04);
+  --prism-border: rgba(255, 255, 255, 0.09);
+  --prism-accent: #FC4100;
+  --prism-accent-dark: #C9340A;
+  --prism-accent-soft: #fff1eb;
+  --prism-gold: #FFC55A;
+  --prism-success: #22c55e;
+  --prism-warning: #f59e0b;
+  --prism-danger: #ef4444;
+  --prism-text-primary: #f1f5f9;
+  --prism-text-muted: #8b9ab0;
+
+  /* Glass surface tokens */
+  --prism-surface: rgba(255, 255, 255, 0.04);
+  --prism-surface-raised: rgba(255, 255, 255, 0.06);
+  --prism-hairline: rgba(255, 255, 255, 0.09);
+  --prism-hairline-strong: rgba(255, 255, 255, 0.14);
+  --prism-border-hover: rgba(252, 65, 0, 0.35);
+  --prism-glow: rgba(252, 65, 0, 0.22);
+  --prism-glow-soft: rgba(252, 65, 0, 0.12);
+  --prism-blur: blur(20px) saturate(150%);
+  --prism-shadow-card: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --prism-shadow-card-hover: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 24px var(--prism-glow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  /* Legacy tokens — now remapped to PRISM orange for brand consistency */
+  --color-primary: #FC4100;
+  --color-primary-dark: #C9340A;
+  --color-primary-light: #FF7043;
+  --color-primary-lighter: #fff1eb;
+
+  /* Secondary (legacy alias — points at PRISM orange) */
+  --color-secondary: #FC4100;
+  --color-secondary-dark: #C9340A;
+  --color-secondary-light: #FF7043;
+
+  /* Accent Colors */
+  --color-accent: #FC4100;
+  --color-accent-dark: #C9340A;
+  --color-accent-light: #FF7043;
+  
+  /* Success Colors */
+  --color-success: #10B981;
+  --color-success-dark: #059669;
+  --color-success-light: #D1FAE5;
+  
+  /* Warning Colors */
+  --color-warning: #F59E0B;
+  --color-warning-dark: #D97706;
+  --color-warning-light: #FEF3C7;
+  
+  /* Error Colors */
+  --color-error: #EF4444;
+  --color-error-dark: #DC2626;
+  --color-error-light: #FEE2E2;
+  
+  /* Neutral Colors */
+  --color-white: #FFFFFF;
+  --color-gray-50: #F9FAFB;
+  --color-gray-100: #F3F4F6;
+  --color-gray-200: #E5E7EB;
+  --color-gray-300: #D1D5DB;
+  --color-gray-400: #9CA3AF;
+  --color-gray-500: #6B7280;
+  --color-gray-600: #4B5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1F2937;
+  --color-gray-900: #111827;
+  --color-black: #000000;
+  
+  /* Status Colors */
+  --status-active: #10B981;
+  --status-expired: #EF4444;
+  --status-expiring: #F59E0B;
+  --status-pending: #6B7280;
+  
+  /* Typography */
+  --font-family-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  
+  /* Font Sizes */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+  --font-size-3xl: 1.875rem;
+  --font-size-4xl: 2.25rem;
+  
+  /* Font Weights */
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  /* Line Heights */
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+  
+  /* Spacing */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  
+  /* Border Radius */
+  --radius-none: 0;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-full: 9999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --shadow-inner: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+  
+  /* Transitions */
+  --transition-fast: 150ms ease-in-out;
+  --transition-base: 250ms ease-in-out;
+  --transition-slow: 350ms ease-in-out;
+  
+  /* Z-Index Scale */
+  --z-dropdown: 1000;
+  --z-sticky: 1020;
+  --z-fixed: 1030;
+  --z-modal-backdrop: 1040;
+  --z-modal: 1050;
+  --z-popover: 1060;
+  --z-tooltip: 1070;
+  --z-toast: 1080;
+  --z-scan-overlay: 2000;
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #111827;
+    --color-surface: #1F2937;
+    --color-surface-elevated: #374151;
+    --color-text-primary: #F9FAFB;
+    --color-text-secondary: #D1D5DB;
+    --color-text-muted: #9CA3AF;
+  }
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-family-primary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--prism-text-primary);
+  background: radial-gradient(1200px 500px at 10% -5%, rgba(252, 65, 0, 0.12), transparent 55%),
+              radial-gradient(800px 400px at 85% 0%, rgba(255, 197, 90, 0.08), transparent 65%),
+              var(--prism-bg);
+  min-height: 100vh;
+}
+
+/* Animation Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { 
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes prism-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(252, 65, 0, 0.42); }
+  50%      { box-shadow: 0 6px 22px rgba(252, 65, 0, 0.75); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes scanLine {
+  0% { top: 0; }
+  50% { top: 100%; }
+  100% { top: 0; }
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-fadeIn { animation: fadeIn var(--transition-base); }
+.animate-slideUp { animation: slideUp var(--transition-base); }
+.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-spin { animation: spin 1s linear infinite; }
+
+/* ── Sync progress animations ─────────────────────────────── */
+@keyframes prism-sync-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.prism-sync-progress__bar {
+  background: linear-gradient(
+    90deg,
+    #FC4100 0%,
+    #FFC55A 40%,
+    #FC4100 80%,
+    #FFC55A 100%
+  );
+  background-size: 200% 100%;
+  animation: prism-sync-shimmer 1.4s linear infinite;
+  box-shadow: 0 0 10px rgba(252, 65, 0, 0.35);
+}
+
+.prism-sync-icon {
+  animation: spin 0.9s linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prism-sync-progress__bar { animation: none; }
+  .prism-sync-icon { animation: none; }
+}
+
+/* QR Scanning Overlay */
+.qr-scan-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Keep background transparent so native camera shows through WebView */
+  background: transparent;
+  z-index: var(--z-scan-overlay);
+  display: none;
+}
+
+body.qr-scanning .qr-scan-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-scan-frame {
+  width: 280px;
+  height: 280px;
+  border: 2px solid var(--color-secondary);
+  border-radius: var(--radius-xl);
+  position: relative;
+  overflow: hidden;
+}
+
+.qr-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-secondary), transparent);
+  animation: scanLine 2s linear infinite;
+  box-shadow: 0 0 10px var(--color-secondary);
+}
+
+/* Skeleton Loading — dark theme aware */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+
+/* Safe Area for Mobile */
+.safe-area-top { padding-top: env(safe-area-inset-top); }
+.safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ============================================================
+ * PRISM Glass Components — shared across mobile screens
+ * ============================================================ */
+
+/* Base glass card — for any elevated surface */
+.prism-card {
+  position: relative;
+  background: var(--prism-surface);
+  backdrop-filter: var(--prism-blur);
+  -webkit-backdrop-filter: var(--prism-blur);
+  border: 1px solid var(--prism-hairline);
+  border-radius: 16px;
+  box-shadow: var(--prism-shadow-card);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s ease,
+              box-shadow 0.25s ease,
+              background 0.25s ease;
+}
+
+.prism-card--interactive {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prism-card--interactive:hover {
+  border-color: var(--prism-border-hover);
+  box-shadow: var(--prism-shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+.prism-card--interactive:active {
+  transform: translateY(0);
+  background: var(--prism-surface-raised);
+  border-color: var(--prism-border-hover);
+}
+
+/* KPI tile — compact stat card with colored top accent */
+.prism-kpi {
+  position: relative;
+  overflow: hidden;
+  background: var(--prism-surface);
+  backdrop-filter: var(--prism-blur);
+  -webkit-backdrop-filter: var(--prism-blur);
+  border: 1px solid var(--prism-hairline);
+  border-radius: 16px;
+  padding: 18px 14px 14px;
+  text-align: center;
+  box-shadow: var(--prism-shadow-card);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s ease,
+              box-shadow 0.25s ease;
+}
+
+.prism-kpi::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--kpi-accent, var(--prism-accent));
+  opacity: 0.85;
+}
+
+.prism-kpi:hover {
+  border-color: var(--prism-border-hover);
+  box-shadow: var(--prism-shadow-card-hover);
+  transform: translateY(-2px);
+}
+
+.prism-kpi__value {
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--kpi-accent, var(--prism-text-primary));
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+
+.prism-kpi__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--prism-text-muted);
+  text-transform: uppercase;
+}
+
+/* Hero gradient card — for page headers */
+.prism-hero {
+  background: linear-gradient(135deg, rgba(252, 65, 0, 0.18), rgba(255, 197, 90, 0.08));
+  backdrop-filter: var(--prism-blur);
+  -webkit-backdrop-filter: var(--prism-blur);
+  border: 1px solid var(--prism-hairline-strong);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.prism-hero__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--prism-gold);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.prism-hero__title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.prism-hero__subtitle {
+  font-size: 0.82rem;
+  color: #b4c1d3;
+  line-height: 1.4;
+}
+
+/* Ghost button — subtle action inside cards */
+.prism-ghost-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--prism-hairline-strong);
+  background: var(--prism-surface-raised);
+  color: var(--prism-text-primary);
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prism-ghost-btn:hover,
+.prism-ghost-btn:active {
+  border-color: var(--prism-border-hover);
+  background: rgba(252, 65, 0, 0.08);
+}
+
+/* Reduced-motion fallback */
+@media (prefers-reduced-motion: reduce) {
+  .prism-card,
+  .prism-card--interactive,
+  .prism-kpi,
+  .prism-ghost-btn {
+    transition: none;
+  }
+  .prism-card--interactive:hover,
+  .prism-kpi:hover {
+    transform: none;
+  }
+}

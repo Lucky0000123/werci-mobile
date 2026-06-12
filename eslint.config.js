@@ -24,8 +24,8 @@ export default defineConfig([
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': 'warn',
       'no-async-promise-executor': 'warn',
-      // Allow unused parameters with underscore prefix
-      '@typescript-eslint/no-unused-vars': ['warn', { 'argsIgnorePattern': '^_' }],
+      // Allow unused parameters and variables with underscore prefix
+      '@typescript-eslint/no-unused-vars': ['warn', { 'argsIgnorePattern': '^_', 'varsIgnorePattern': '^_', 'destructuredArrayIgnorePattern': '^_', 'caughtErrorsIgnorePattern': '^_' }],
     },
   },
 ])

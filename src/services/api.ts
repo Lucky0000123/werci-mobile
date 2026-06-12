@@ -5,12 +5,36 @@ import connectionManager from './connectionManager'
 // Environment-based configuration with proper fallbacks (used only as last resort)
 // Priority: emulator/localhost (highest) → company network → cloud (lowest)
 const DEV_BASE = import.meta.env.VITE_DEV_BASE || 'http://10.0.2.2:8082'          // Android emulator host alias
-const LOCAL_BASE = import.meta.env.VITE_LOCAL_BASE || 'http://10.40.20.184:8082'  // Company network (LAN) - FIXED PORT
-const CLOUD_BASE = import.meta.env.VITE_CLOUD_BASE || 'http://159.65.13.232:5000' // Cloud fallback - CORRECT PORT 5000
-const HEALTH_TIMEOUT = parseInt(import.meta.env.VITE_HEALTH_CHECK_TIMEOUT || '5000')
-const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '10000')
+const LOCAL_BASE = import.meta.env.VITE_LOCAL_BASE || 'http://10.40.20.184:8082'   // Production server on port 8082 (LAN)
+const CLOUD_BASE = import.meta.env.VITE_CLOUD_BASE || 'https://api.werci.my.id'    // Cloudflare Tunnel — HTTPS, works on 4G/anywhere
+const HEALTH_TIMEOUT = parseInt(import.meta.env.VITE_HEALTH_CHECK_TIMEOUT || '8000')
+const API_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT || '15000')
 
 export type ApiOptions = { token?: string; timeout?: number }
+
+// Module-level token cache so every API call carries auth without each
+// caller passing it. auth.ts keeps this in sync via setCachedToken() whenever
+// the session is restored/written/cleared (session now lives in Capacitor
+// Preferences). localStorage remains a read-only fallback for sessions
+// written by older app versions that haven't bootstrapped yet.
+const SESSION_KEY = 'prism_session_v1'
+let cachedToken: string | null = null
+
+export function setCachedToken(token: string | null): void {
+  cachedToken = token
+}
+
+export function getStoredToken(): string | null {
+  if (cachedToken) return cachedToken
+  try {
+    const raw = localStorage.getItem(SESSION_KEY)
+    if (!raw) return null
+    const session = JSON.parse(raw) as { token?: string }
+    return session?.token || null
+  } catch {
+    return null
+  }
+}
 
 // Cache for endpoint health to avoid duplicate checks
 const endpointCache = new Map<string, { healthy: boolean; lastCheck: number; responseTime: number }>()
@@ -42,7 +66,7 @@ async function probe(url: string, timeoutMs = HEALTH_TIMEOUT): Promise<{ healthy
     endpointCache.set(cacheKey, { healthy, lastCheck: Date.now(), responseTime })
 
     return { healthy, responseTime }
-  } catch (error) {
+  } catch {
     const responseTime = Date.now() - startTime
     // Cache the failure
     endpointCache.set(cacheKey, { healthy: false, lastCheck: Date.now(), responseTime })
@@ -63,7 +87,7 @@ async function pickBase(): Promise<string> {
     await connectionManager.forceCheck()
     const activeAfterCheck = connectionManager.getActiveEndpoint()
     if (activeAfterCheck) return activeAfterCheck
-  } catch (_) {
+  } catch {
     // ignore and fall back to legacy logic below
   }
 
@@ -98,14 +122,17 @@ export async function apiFetch(path: string, init: RequestInit = {}, opts: ApiOp
   const base = await pickBase()
   const headers = new Headers(init.headers)
 
-  // Add authentication if token provided
-  if (opts.token) {
-    headers.set('Authorization', `Bearer ${opts.token}`)
+  // Add authentication: explicit token wins, otherwise fall back to the
+  // persisted session token. Server endpoints now require auth for all
+  // fleet/personnel data, so unauthenticated calls would 401.
+  const token = opts.token || getStoredToken()
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
   }
 
   // Set content type for JSON requests (do NOT set for FormData)
   const method = (init.method || 'GET').toUpperCase()
-  const isFormData = typeof FormData !== 'undefined' && (init as any).body instanceof FormData
+  const isFormData = typeof FormData !== 'undefined' && (init as { body?: unknown }).body instanceof FormData
   if (!headers.has('Content-Type') && (method === 'POST' || method === 'PUT' || method === 'PATCH') && !isFormData) {
     headers.set('Content-Type', 'application/json')
   }
