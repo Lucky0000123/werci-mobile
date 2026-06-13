@@ -291,7 +291,10 @@ export default function PersonDetailPage() {
     const run = async () => {
       const pairing = await loadCurrentPairing()
       if (cancelled) return
-      if (fromScan && personHasKimper && !pairing && !autoOpenedPairing.current) {
+      // Only auto-open for vehicle operators (KIMPER holders who also have
+      // authorized units listed). Safety-card holders without units are not drivers.
+      const isVehicleOperator = Boolean(authorizedUnitsList && authorizedUnitsList.length > 0)
+      if (fromScan && personHasKimper && isVehicleOperator && !pairing && !autoOpenedPairing.current) {
         autoOpenedPairing.current = true
         setShowPairModal(true)
       }

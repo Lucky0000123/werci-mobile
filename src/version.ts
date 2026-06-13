@@ -7,10 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.4.1 — Pairing auto-trigger limited to vehicle operators only (must have
+ *          authorized units; KIMPER-only safety-card holders no longer trigger it).
  * 2.4.0 — KIMPER-gated pairing flow (auto-opens on QR scan, details-first,
  *          vehicle autocomplete, paired banner + unpair).
  * 2.3.0 — driver↔vehicle pairing with KIMPER gate, trucks on live map,
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.4.0'
+export const APP_VERSION = '2.4.1'
