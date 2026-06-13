@@ -1784,6 +1784,26 @@ class OfflineDataSyncService {
     }
   }
 
+  // Look up a person by KIMPER id (the people store carries a kimper_id index).
+  async lookupPersonByKimperId(kimperId: number): Promise<Person | null> {
+    await this.initialize()
+    if (kimperId == null) return null
+    if (this.memoryMode) {
+      for (const p of this.memoryStores.people.values()) {
+        if (p.kimper?.kimper_id === kimperId) return p
+      }
+      return null
+    }
+    if (!this.db) return null
+    if (!this.db.objectStoreNames.contains('people')) return null
+    try {
+      return (await this.db.getFromIndex('people', 'kimper_id', kimperId)) || null
+    } catch (error) {
+      console.error('❌ Person lookup by kimper_id failed:', error)
+      return null
+    }
+  }
+
   // Get all KIMPER records (for employee search)
   async getAllKimper(): Promise<KimperFullInfo[]> {
     await this.initialize()
@@ -2744,6 +2764,31 @@ class OfflineDataSyncService {
         _partial: true,
       }
       return { card: partialCard, source: 'employees' }
+    }
+
+    return null
+  }
+
+  /**
+   * Offline-first card resolution for a KIMPER QR scan, keyed by kimper_id.
+   * Mirrors lookupPersonCardOffline: qrCache (previous online scan) → bulk
+   * people store. Returns a card tagged `_offline` (so the page silently
+   * background-refreshes) or null when nothing is cached for this KIMPER.
+   */
+  async lookupPersonCardOfflineByKimperId(kimperId: number): Promise<PersonCardData | null> {
+    if (kimperId == null) return null
+
+    // 1) Richest: a previous online scan cached under this kimper id.
+    const qrCached = await this.getQrCache<PersonCardData>(this.cardCacheKeysFromLookup({ kimperId }))
+    if (qrCached) {
+      return { ...qrCached.data, _offline: { cachedAt: qrCached.cachedAt } }
+    }
+
+    // 2) Bulk-synced people store (carries training/violations).
+    const person = await this.lookupPersonByKimperId(kimperId)
+    if (person) {
+      const lastSync = await this.getLastSyncTime()
+      return this.personToPersonCardData(person, lastSync || Date.now())
     }
 
     return null

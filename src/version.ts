@@ -7,6 +7,10 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.4.2 — Offline-first QR scan (instant render from on-device cache + silent
+ *          background refresh; network only when nothing is cached). Person
+ *          page: "No KIMPER Available" empty state, professional training
+ *          placeholders, KTP/NIK hidden.
  * 2.4.1 — Pairing auto-trigger limited to vehicle operators only (must have
  *          authorized units; KIMPER-only safety-card holders no longer trigger it).
  * 2.4.0 — KIMPER-gated pairing flow (auto-opens on QR scan, details-first,
@@ -15,4 +19,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.4.1'
+export const APP_VERSION = '2.4.2'

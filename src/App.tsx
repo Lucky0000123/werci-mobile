@@ -517,6 +517,15 @@ function AppContent() {
         return
       }
 
+      // Offline-first: render the cached profile instantly when we have it,
+      // then let PersonDetailPage refresh it from the network in the background.
+      const offlineCard = await offlineDataSync.lookupPersonCardOfflineByKimperId(kimperId)
+      if (offlineCard?.success) {
+        openPersonDetail(offlineCard)
+        addToast('success', `Person found: ${offlineCard.person.name || offlineCard.employee.name}`)
+        return
+      }
+
       const personData = await offlineDataSync.fetchPersonCardData({ kimperId })
       if (personData?.success) {
         openPersonDetail(personData)
@@ -550,7 +559,7 @@ function AppContent() {
 
       const employeeId = parts[1].split('?')[0].split('#')[0]
 
-      addToast('info', 'Looking up employee online...')
+      addToast('info', 'Looking up employee…')
 
       const target = await resolveEmployeeScanTarget({
         employeeId,

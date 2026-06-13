@@ -176,6 +176,43 @@ function InfoGrid({
   )
 }
 
+// A clean, professional empty state used wherever a section has no data to
+// show (no KIMPER linked, training not synced yet, …) — replaces rows of
+// em-dash placeholders that read as "broken/missing".
+function EmptyState({ icon, title, message }: { icon: string; title: string; message: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        gap: '8px',
+        padding: '22px 18px',
+        borderRadius: '16px',
+        background: C.surfaceAlt,
+        border: `1px dashed ${C.borderStrong}`,
+      }}
+    >
+      <div
+        style={{
+          width: '46px',
+          height: '46px',
+          borderRadius: '14px',
+          background: C.accentSoft,
+          display: 'grid',
+          placeItems: 'center',
+          fontSize: '1.35rem',
+        }}
+      >
+        {icon}
+      </div>
+      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: C.textPri }}>{title}</div>
+      <div style={{ fontSize: '0.8rem', color: C.textMut, lineHeight: 1.5, maxWidth: '290px' }}>{message}</div>
+    </div>
+  )
+}
+
 export default function PersonDetailPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -265,8 +302,17 @@ export default function PersonDetailPage() {
 
   // ── Driver↔vehicle pairing state (drivers = people with a KIMPER) ────────
   const personEmployeeId = cardData?.person?.employee_id ? String(cardData.person.employee_id) : null
+  // A real KIMPER licence — an id or any licence/expiry field. A bare
+  // kimper_status of "NO_KIMPER"/"Not Linked" does NOT count, so people with no
+  // licence get a clean "No KIMPER" state and never see the pairing prompt.
   const personHasKimper = Boolean(
-    cardData?.person?.kimper_id != null || cardData?.kimper || cardData?.person?.kimper_status
+    cardData?.person?.kimper_id != null ||
+    cardData?.kimper?.kimper_id != null ||
+    cardData?.kimper?.police_license_type ||
+    cardData?.kimper?.police_license_category ||
+    cardData?.kimper?.police_license_expired_date ||
+    cardData?.kimper?.kimper_expired_date ||
+    cardData?.kimper?.mcu_expire_date
   )
   const autoOpenedPairing = useRef(false)
 
@@ -686,7 +732,7 @@ export default function PersonDetailPage() {
           <InfoGrid
             items={[
               { label: t('employeeStatusLbl'), value: person.status || employee.status, badgeColor: statusColor(person.status || employee.status) },
-              { label: t('ktpNikLbl'), value: person.ktp_number || employee.ktp_number },
+              { label: 'Company', value: person.company || employee.company },
               { label: 'Position', value: person.position_title || employee.position },
               { label: 'Section', value: person.section || employee.section },
             ]}
@@ -695,22 +741,13 @@ export default function PersonDetailPage() {
 
         <Section title={t('trainingSummaryLbl')} icon="🎓" subtitle={t('trainingSummarySub')}>
           {!hasTrainingData ? (
-            <div style={{
-              padding: '14px 16px', borderRadius: '14px', textAlign: 'center',
-              background: C.surfaceAlt, border: `1px dashed ${C.border}`,
-              color: C.textMut, fontSize: '0.82rem', fontWeight: 600,
-            }}>
-              {isPartial ? (
-                <>
-                  🔒 {t('trainingDetailsNotSynced')}
-                </>
-              ) : (
-                <>
-                  🔒 Training data not available offline.<br />
-                  <span style={{ fontWeight: 500 }}>Connect to the internet to sync this employee’s training records.</span>
-                </>
-              )}
-            </div>
+            <EmptyState
+              icon="🎓"
+              title={isPartial ? 'Training details not synced' : 'Training records unavailable'}
+              message={isPartial
+                ? 'A full sync is needed to load this person’s training records. Reconnect and sync to view them.'
+                : 'Training records aren’t available on this device yet. Reconnect to the internet to sync them.'}
+            />
           ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '10px', marginBottom: '14px' }}>
             {[
@@ -799,16 +836,24 @@ export default function PersonDetailPage() {
         </Section>
 
         <Section title={t('kimperDetailsLbl')} icon="🪪" subtitle={t('kimperDetailsSub')}>
-          <InfoGrid
-            items={[
-              { label: t('kimperStatusLbl'), value: kimper?.status || person.kimper_status || t('notLinkedLbl'), badgeColor: statusColor(kimper?.status || person.kimper_status) },
-              { label: t('kimperIdLbl'), value: kimper?.kimper_id ?? person.kimper_id ?? '—' },
-              { label: t('licenseTypeLbl'), value: kimper?.police_license_type },
-              { label: t('licenseCategoryLbl'), value: kimper?.police_license_category },
-              { label: t('licenseExpiryLbl'), value: kimper?.police_license_expired_date, formatAsDate: true },
-              { label: t('mcuExpiryLbl'), value: kimper?.mcu_expire_date, formatAsDate: true },
-            ]}
-          />
+          {hasKimper ? (
+            <InfoGrid
+              items={[
+                { label: t('kimperStatusLbl'), value: kimper?.status || person.kimper_status || t('notLinkedLbl'), badgeColor: statusColor(kimper?.status || person.kimper_status) },
+                { label: t('kimperIdLbl'), value: kimper?.kimper_id ?? person.kimper_id ?? '—' },
+                { label: t('licenseTypeLbl'), value: kimper?.police_license_type },
+                { label: t('licenseCategoryLbl'), value: kimper?.police_license_category },
+                { label: t('licenseExpiryLbl'), value: kimper?.police_license_expired_date, formatAsDate: true },
+                { label: t('mcuExpiryLbl'), value: kimper?.mcu_expire_date, formatAsDate: true },
+              ]}
+            />
+          ) : (
+            <EmptyState
+              icon="🪪"
+              title="No KIMPER Available"
+              message="This person has no KIMPER mining licence linked to their profile."
+            />
+          )}
         </Section>
 
         <Section title={t('safetyHistoryLbl')} icon="⚠️" subtitle={t('safetyHistorySub')}>
