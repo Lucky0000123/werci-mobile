@@ -92,6 +92,13 @@ export async function flushAllPending(): Promise<void> {
     .catch(() => { /* location share not started */ })
 
   try {
+    // 0. Pull fresh people data into the offline cache if it's gone stale.
+    //    Runs on every background-fetch tick (~15 min, even headless), every
+    //    foreground return, and every reconnect — so the user never has to
+    //    manually refresh. The 2 h freshness gate keeps real fetches to once
+    //    per ~2 h; in between this is a cheap local no-op.
+    await refreshPeopleDataIfStale()
+
     // 1. Sync existing inspection/photo queue
     await syncService.startSync()
 
@@ -108,6 +115,34 @@ export async function flushAllPending(): Promise<void> {
     }
   } catch (error) {
     console.error('[BackgroundSync] Flush failed:', error)
+  }
+}
+
+/**
+ * Opportunistically refresh the cached people dataset so workers always scan
+ * against recent data without ever tapping "sync". Safe to call on every
+ * background tick / foreground return / reconnect because it's gated three ways:
+ *   - only when signed in (a token exists),
+ *   - only after an initial sync (so we run a fast DELTA here, never the heavy
+ *     first-time chunked download inside a constrained background window),
+ *   - syncOfflineData's own 2 h freshness gate makes it a no-op when fresh.
+ */
+async function refreshPeopleDataIfStale(): Promise<void> {
+  try {
+    const { authService } = await import('./auth')
+    const token = await authService.getToken()
+    if (!token) return // not signed in — nothing to refresh
+
+    const { offlineDataSync } = await import('./offlineDataSync')
+    const status = await offlineDataSync.getSyncStatus()
+    if (!status.hasData) return // let the foreground run the first full sync
+
+    const result = await offlineDataSync.syncOfflineData(false)
+    if (result.success && !result.cached) {
+      console.log('[BackgroundSync] People data auto-refreshed:', result.message)
+    }
+  } catch (e) {
+    console.warn('[BackgroundSync] People refresh skipped:', e)
   }
 }
 

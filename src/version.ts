@@ -7,6 +7,10 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.4.3 — Automatic data refresh: the cached people dataset now re-syncs by
+ *          itself (~every 2 h) on background-fetch ticks, foreground return,
+ *          and reconnect — no manual "sync" needed. Fast delta only; gated by
+ *          the existing 2 h freshness check.
  * 2.4.2 — Offline-first QR scan (instant render from on-device cache + silent
  *          background refresh; network only when nothing is cached). Person
  *          page: "No KIMPER Available" empty state, professional training
@@ -19,4 +23,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.4.2'
+export const APP_VERSION = '2.4.3'
