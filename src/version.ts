@@ -7,6 +7,9 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.5.1 — Dropped the in-progress offline Site Map tab (never released; bundled
+ *          GeoJSON + leaflet removed). Bottom nav stays 4 tabs:
+ *          Home · Scan · History · Settings.
  * 2.4.3 — Automatic data refresh: the cached people dataset now re-syncs by
  *          itself (~every 2 h) on background-fetch ticks, foreground return,
  *          and reconnect — no manual "sync" needed. Fast delta only; gated by
@@ -23,4 +26,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.4.3'
+export const APP_VERSION = '2.5.1'
