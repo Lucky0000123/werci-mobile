@@ -1,7 +1,7 @@
 {
   "name": "prism-mobile",
   "private": true,
-  "version": "2.2.1",
+  "version": "2.6.0",
   "description": "PRISM Inspector — mobile companion for the PRISM inspection system.",
   "type": "module",
   "scripts": {

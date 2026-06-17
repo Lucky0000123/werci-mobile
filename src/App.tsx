@@ -132,6 +132,7 @@ const PersonDetailPage = lazy(() => import('./pages/PersonDetailPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const HistoryPage = lazy(() => import('./pages/HistoryPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const DispatchPage = lazy(() => import('./pages/DispatchPage'))
 
 function AppContent() {
   const location = useLocation()
@@ -694,6 +695,7 @@ function AppContent() {
             <Route path="/employee-detail" element={<EmployeeDetailPage />} />
             <Route path="/person-detail" element={<PersonDetailPage />} />
             <Route path="/history" element={<HistoryPage onShowToast={addToast} />} />
+            <Route path="/dispatch" element={<DispatchPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
           </Suspense>

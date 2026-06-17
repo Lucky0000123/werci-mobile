@@ -7,6 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.6.0 — Dispatch (in-cab): new Dispatch tab. Enter employee ID → Kimper
+ *          identity + authorized equipment → enter the unit operated today →
+ *          connect to a truck/excavator (authorization-gated). Position stays
+ *          on the TMS feed; connection links person↔unit for the shift.
+ *          Operator loading-zone monitor (assigned trucks by zone) + Load Truck
+ *          button that records a load event when a truck is in the loading zone.
  * 2.5.1 — Dropped the in-progress offline Site Map tab (never released; bundled
  *          GeoJSON + leaflet removed). Bottom nav stays 4 tabs:
  *          Home · Scan · History · Settings.
@@ -26,4 +32,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.5.1'
+export const APP_VERSION = '2.6.0'
