@@ -7,6 +7,85 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.14.0 — Truck OUI redesign (prototype tablet layout). The dump-truck operator
+ *          screen is now: a TOP STATUS BAR (truck no · driver · GPS/RFID/ONLINE
+ *          pills), a 12-state CYCLE STEPPER above a big NAV MAP (left), an
+ *          OPERATOR ACTION card (state action + Request Status Change + Report
+ *          GPS Unavailable) · EQUIPMENT STATUS · a full ASSIGNMENT grid (Truck,
+ *          Excavator, Loading/Dump, Loaded/Empty Weighbridge, Sample House,
+ *          Material, Plan, Shift/Date, Next Location) on the right, and a bottom
+ *          CURRENT / NEXT / NEXT-LOCATION chip bar. Map replaces the prototype's
+ *          circular cycle picture; speed shows as a map overlay. (Weighbridge/
+ *          sample/material/shift wire from the dispatch plan next.)
+ * 2.13.0 — Single-screen OUI (no page scroll) for BOTH truck & excavator —
+ *          landscape 2-column layout that fills the viewport (queue scrolls
+ *          internally only). Dump-truck map upgraded to NAV mode: the haul-road
+ *          "road ahead" route line (/api/dispatch/route) to the destination,
+ *          follow-truck at street zoom, geofence + heading marker. Manual status
+ *          moved to a modal to reclaim space. Excavator stays map-less.
+ * 2.12.0 — Dump-truck OUI (prototype-aligned). The truck operator window now
+ *          shows a LIVE MAP (Leaflet + Esri satellite) to its next location —
+ *          truck GPS heading marker, the destination (loading point when empty,
+ *          dump when full) with a geofence circle, and a route line. A digital
+ *          SPEEDOMETER (km/h), plus colour-coded CURRENT and NEXT state tiles +
+ *          next-location read-out. Haul-road empty/full lanes overlay when the
+ *          backend exposes them (/api/dispatch/roads — ships next deploy).
+ *          Excavator window stays map-less.
+ * 2.11.0 — Dispatch i18n + cab polish. The ModePicker + the whole Dispatch flow
+ *          (connect, excavator & truck operator windows, manual status) now
+ *          translate with the language switch (EN + Bahasa Indonesia, EN
+ *          fallback for zh/es) via src/services/dispatchI18n.ts. Cab header reads
+ *          "FMS Dispatch" (not the account name). Selecting FMS now auto-syncs
+ *          the people roster to the on-device cache for offline identify.
+ * 2.10.0 — Entry MODE PICKER. First screen (when logged out) asks User vs FMS.
+ *          "User" → normal username/password login → full app (with a "← Back to
+ *          mode selection"). "FMS" → silent in-cab service-account sign-in →
+ *          Dispatch board ONLY (bottom nav hidden, all other routes bounce to
+ *          /dispatch). Logout returns to the picker so an admin can switch in.
+ *          FMS is detected by account role ('dispatch'); replaces the always-on
+ *          auto cab login. (2.9.2/2.9.3 were the cab-mode bootstrap + password
+ *          fixes that this supersedes.)
+ * 2.9.1 — Cab / kiosk mode: the APK now skips the username/password screen,
+ *          silently signs in as a dedicated low-privilege viewer service account
+ *          (fms_cab) and opens straight to the Dispatch "Enter Employee ID"
+ *          screen. Operators only type their employee ID. Falls back to the
+ *          normal login screen if the silent sign-in fails. Configured via
+ *          .env.production.local (VITE_CAB_MODE/USERNAME/PASSWORD).
+ * 2.9.0 — Dispatch operator flow reworked to the WBN FMS prototype. No more
+ *          "Connect Truck / Connect Excavator" choice: type the unit number →
+ *          dropdown of matching excavator/dump-truck units (GET /api/dispatch/
+ *          units) → tap one → the app auto-detects the equipment type and opens
+ *          the correct OPERATOR WINDOW. Excavator window: current-loading +
+ *          live clock, queue with the next truck, plan details, big FULL button.
+ *          Truck window: one state-driven primary action button that walks the
+ *          12-state cycle (Confirm Start Loading → … → Join Queue) with the exact
+ *          prototype colours/labels, plus assignment details. Both windows have
+ *          manual MACHINE AVAILABILITY status (delay/standby/breakdown/
+ *          maintenance + reasons → /api/dispatch/equipment-status) that records
+ *          without breaking the cycle. Scan button now matches the hero height.
+ * 2.8.3 — Home: moved the "Scan QR" button up into the top hero box (the one
+ *          showing "Last synced"), on the same row as the title; removed it from
+ *          the Employee Card search row.
+ * 2.8.1 — Home: QR scan consolidated into one "Scan QR" button next to the
+ *          "Employee Card" header (opens the camera); removed the separate Scan
+ *          bottom-nav tab (now Home · Dispatch · History · Settings).
+ * 2.8.0 — Dispatch OFFLINE-FIRST (phase 0+1): IDENTIFY now resolves from the
+ *          on-device cached roster FIRST (works with no signal — fixes the
+ *          "network error" when entering an employee ID offline), then enriches
+ *          from the server when reachable. Pure authorization helpers
+ *          (classify_equipment/allowed_types/allowed_actions/kimper_status)
+ *          ported to src/services/dispatchEngine.ts. Offline banner + a "from
+ *          saved list · offline" indicator. (Connect/load still need signal —
+ *          durable offline outbox lands in a later phase.)
+ * 2.7.0 — Dispatch CYCLE v2: trucks now carry a 12-state cycle status,
+ *          recoloured to the WBN FMS prototype palette (see
+ *          docs/dispatch_cycle_spec.md). Two-phase load handshake — the TRUCK
+ *          DRIVER taps "First Bucket" (Spotting→Loading) and the EXCAVATOR
+ *          operator taps "Finish Loading" (Loading→Full Travel 1, auto-promotes
+ *          the next waiting truck). New driver console: live coloured state
+ *          chip + First Bucket / Confirm Dump Arrival / Depart-Complete Dumping.
+ *          Excavator monitor recolours rows by state and replaces "Load" with
+ *          "Finish Loading" (only the truck loading on this excavator).
  * 2.6.0 — Dispatch (in-cab): new Dispatch tab. Enter employee ID → Kimper
  *          identity + authorized equipment → enter the unit operated today →
  *          connect to a truck/excavator (authorization-gated). Position stays
@@ -32,4 +111,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.6.0'
+export const APP_VERSION = '2.14.0'
