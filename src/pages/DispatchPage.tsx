@@ -732,7 +732,7 @@ function ExcavatorOperatorWindow({ employeeId, excavatorNo, operatorName }:
 // ════════════════════════════════════════════════════════════════════════
 //  TRUCK DRIVER WINDOW
 // ════════════════════════════════════════════════════════════════════════
-function TruckDriverWindow({ employeeId, truckNo, driverName }:
+function TruckDriverWindow({ employeeId, truckNo }:
   { employeeId: string; truckNo: string; driverName?: string }) {
   const dt = useDispatchT()
   const [truck, setTruck] = useState<OpTruck | null>(null)
@@ -744,6 +744,7 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
   const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number } | null>(null)
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
+  const [routeSegments, setRouteSegments] = useState<{ lane: string; coordinates: [number, number][] }[] | null>(null)
   const [otherLoading, setOtherLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
@@ -886,15 +887,17 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
     let alive = true
     async function fetchRoute() {
       const from = fromRef.current, to = toRef.current
-      if (!from || !to) { if (alive) setRoutePts(null); return }
+      if (!from || !to) { if (alive) { setRoutePts(null); setRouteSegments(null) } return }
       try {
         const r = await apiFetch(`/api/dispatch/route?from_lat=${from.lat}&from_lng=${from.lng}&to_lat=${to.lat}&to_lng=${to.lng}&weight=time`)
         const d = await r.json()
         if (!alive) return
         if (d.available && Array.isArray(d.coordinates) && d.coordinates.length >= 2) {
           setRoutePts(d.coordinates.map((c: number[]) => [c[1], c[0]] as [number, number]))
-        } else setRoutePts(null)
-      } catch { if (alive) setRoutePts(null) }
+          // curated haul-lane segments (loaded/empty) when available
+          setRouteSegments(Array.isArray(d.segments) && d.segments.length ? d.segments : null)
+        } else { setRoutePts(null); setRouteSegments(null) }
+      } catch { if (alive) { setRoutePts(null); setRouteSegments(null) } }
     }
     fetchRoute()
     const h = setInterval(fetchRoute, 15000)
@@ -905,17 +908,11 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
   const shiftDate = '—'   // shift/date not in operator-view yet — wire from the dispatch plan
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-
-      {/* ── slim header: operator · shift (no truck-number row, no status pills) ── */}
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 8, padding: '0 2px' }}>
-        <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem' }}>{driverName || dt('driver')}</span>
-        <span style={{ color: D.sub, fontSize: '0.72rem' }}>· {dt('dump_truck')}{shiftDate !== '—' ? ' · ' + shiftDate : ''}</span>
-      </div>
-
-      {/* ── MIDDLE: (cycle + map + state chips) | (action · status · assignment) ── */}
+      {/* MIDDLE: map (~50%) | data (~50%). The operator name lives in the parent
+          top bar — no header here (avoids the duplicate name + saves space). */}
       <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
-        {/* LEFT */}
-        <div style={{ flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+        {/* LEFT — map column, ~50% */}
+        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {!nonOp && <CycleStepper current={st} />}
           <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             {nonOp ? (
@@ -929,7 +926,7 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
             ) : (
               <>
                 <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                        destKind={destKind} stateColor={curColor} route={routePts} roads={roads} height="100%" />
+                        destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads} height="100%" />
                 {speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -948,8 +945,8 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
           </div>
         </div>
 
-        {/* RIGHT — action · status · assignment (compact; no scroll) */}
-        <div style={{ flex: '1 1 0', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+        {/* RIGHT — data column, ~50% (action · status · assignment; no scroll) */}
+        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {err && !truck && <div style={{ ...panel, color: C.amber, flexShrink: 0 }}>{err}</div>}
 
           {!nonOp && (

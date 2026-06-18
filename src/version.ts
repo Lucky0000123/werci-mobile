@@ -7,6 +7,11 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.17.0 — Truck OUI tweaks: removed the duplicate operator-name header (name
+ *          stays only in the parent top bar); map column trimmed to ~50% width
+ *          (right 50% for the data); the nav map is now LOCKED — no finger
+ *          pan/zoom/rotate (MapLibre interactive:false / Leaflet gestures off),
+ *          it only follows the truck + shows the backend-defined road/route.
  * 2.16.0 — Truck OUI space cleanup. Dropped the top status bar (truck-number row
  *          + GPS/RFID/ONLINE pills) → slim one-line header (operator · shift).
  *          CURRENT / NEXT / NEXT-LOCATION chips moved UNDER the map; the right
@@ -123,4 +128,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.15.0'
+export const APP_VERSION = '2.17.0'
