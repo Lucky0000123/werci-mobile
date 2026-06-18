@@ -7,6 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.19.0 — Truck OUI fit pass: PRISM logo added to the top bar (left); the
+ *          OPERATOR ACTION block compacted (smaller action/awaiting line, the
+ *          Request Status Change + Report GPS Unavailable buttons sit right
+ *          under it); CURRENT/NEXT/NEXT-LOCATION chips shrunk; assignment grid
+ *          tightened (MiniTile) + fills remaining space so all data fits on one
+ *          screen with no scroll.
  * 2.17.0 — Truck OUI tweaks: removed the duplicate operator-name header (name
  *          stays only in the parent top bar); map column trimmed to ~50% width
  *          (right 50% for the data); the nav map is now LOCKED — no finger
@@ -128,4 +134,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.17.0'
+export const APP_VERSION = '2.19.0'

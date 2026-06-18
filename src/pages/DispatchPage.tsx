@@ -20,6 +20,7 @@ import type { ConnectionStatus } from '../services/connectionManager'
 import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
 import NavMap from '../components/NavMap'
+import prismLogo from '../assets/Logo1_splash.png'
 
 // ── types ────────────────────────────────────────────────────────────────
 type AllowedAction = { action: 'connect_truck' | 'connect_excavator'; unit_type: string; label: string }
@@ -342,8 +343,9 @@ export default function DispatchPage() {
     return (
       <div style={{ height: 'calc(100dvh - 96px)', boxSizing: 'border-box', background: D.bg,
                     padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
-        {/* compact top bar — name, warnings, switch/end */}
+        {/* compact top bar — logo, name, warnings, switch/end */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <img src={prismLogo} alt="PRISM" style={{ height: 28, width: 'auto', flexShrink: 0 }} />
           <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8, overflow: 'hidden' }}>
             <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {profile.name || profile.employee_id}
@@ -889,7 +891,7 @@ function TruckDriverWindow({ employeeId, truckNo }:
       const from = fromRef.current, to = toRef.current
       if (!from || !to) { if (alive) { setRoutePts(null); setRouteSegments(null) } return }
       try {
-        const r = await apiFetch(`/api/dispatch/route?from_lat=${from.lat}&from_lng=${from.lng}&to_lat=${to.lat}&to_lng=${to.lng}&weight=time`)
+        const r = await apiFetch(`/api/dispatch/route?from_lat=${from.lat}&from_lng=${from.lng}&to_lat=${to.lat}&to_lng=${to.lng}&weight=time&lane=${isFull ? 'loaded' : 'empty'}`)
         const d = await r.json()
         if (!alive) return
         if (d.available && Array.isArray(d.coordinates) && d.coordinates.length >= 2) {
@@ -950,29 +952,29 @@ function TruckDriverWindow({ employeeId, truckNo }:
           {err && !truck && <div style={{ ...panel, color: C.amber, flexShrink: 0 }}>{err}</div>}
 
           {!nonOp && (
-            <div style={{ ...panel, flexShrink: 0, padding: 10 }}>
-              <SectionLabel icon="▸" text="OPERATOR ACTION" />
+            <div style={{ ...panel, flexShrink: 0, padding: 8 }}>
               {act ? (
                 <button onClick={() => run(act)} disabled={acting || (act.kind === 'first_bucket' && otherLoading)}
-                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 64, fontSize: '1.15rem', marginTop: 8 }}>
+                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 48, fontSize: '1rem' }}>
                   {acting ? dt('recording')
                     : (act.kind === 'first_bucket' && otherLoading) ? dt('another_loading')
                     : actLabel}
                 </button>
               ) : (
-                <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: D.panel2, border: `1px solid ${D.line}` }}>
-                  <div style={{ color: D.accent, fontWeight: 800, fontSize: '0.68rem', letterSpacing: '0.07em' }}>AWAITING EVENT</div>
-                  <div style={{ color: D.sub2, fontSize: '0.84rem', marginTop: 4 }}>
+                <div style={{ padding: '6px 10px', borderRadius: 10, background: D.panel2, border: `1px solid ${D.line}` }}>
+                  <span style={{ color: D.accent, fontWeight: 800, fontSize: '0.62rem', letterSpacing: '0.06em' }}>AWAITING EVENT · </span>
+                  <span style={{ color: D.sub2, fontSize: '0.8rem' }}>
                     {st === 'loading' ? dt('loading_in_progress') : st === 'waiting' ? dt('waiting_bucket') : dt('no_action')}
-                  </div>
+                  </span>
                 </div>
               )}
-              {msg && msg !== '✓' && <div style={{ fontSize: '0.8rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 6 }}>{msg}</div>}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              {msg && msg !== '✓' && <div style={{ fontSize: '0.78rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 4 }}>{msg}</div>}
+              {/* secondary actions UNDER the action/awaiting */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                 <button onClick={() => setStatusOpen(true)} style={secBtn}>Request Status Change</button>
                 <button onClick={() => setGpsNote((v) => !v)} style={secBtn}>Report GPS Unavailable</button>
               </div>
-              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.74rem', marginTop: 6 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
+              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.72rem', marginTop: 4 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
             </div>
           )}
 
@@ -982,10 +984,10 @@ function TruckDriverWindow({ employeeId, truckNo }:
                                  onChange={(status, reason) => setManual({ status, reason })} />
           </div>
 
-          {/* ASSIGNMENT — compact grid, fits without scrolling */}
-          <div style={{ ...panel, flexShrink: 0, padding: 10 }}>
+          {/* ASSIGNMENT — fills remaining space; compact grid fits in view */}
+          <div style={{ ...panel, flex: '1 1 0', minHeight: 0, overflow: 'hidden', padding: 8, display: 'flex', flexDirection: 'column' }}>
             <SectionLabel icon="📍" text="ASSIGNMENT" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 5 }}>
               <MiniTile k="Truck ID" v={truck?.truck_no || truckNo} />
               <MiniTile k="Assigned Excavator" v={excavatorNo || '—'} />
               <MiniTile k="Loading Source" v={loadingLoc || '—'} />
@@ -1009,9 +1011,9 @@ function TruckDriverWindow({ employeeId, truckNo }:
 // Compact assignment tile (denser than Tile) so the grid fits with no scroll.
 function MiniTile({ k, v }: { k: string; v: string }) {
   return (
-    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 8, padding: '4px 8px' }}>
-      <div style={{ color: D.sub, fontSize: '0.55rem', letterSpacing: '0.03em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
-      <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.8rem', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 7, padding: '3px 7px' }}>
+      <div style={{ color: D.sub, fontSize: '0.5rem', letterSpacing: '0.02em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
+      <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.76rem', marginTop: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
     </div>
   )
 }
@@ -1024,9 +1026,9 @@ function SectionLabel({ icon, text }: { icon: string; text: string }) {
 }
 function BottomChip({ label, value, color, big }: { label: string; value: string; color: string; big?: boolean }) {
   return (
-    <div style={{ flex: big ? '1.2 1 0' : '1 1 0', background: `${color}14`, border: `1px solid ${color}55`, borderRadius: 12, padding: '10px 14px', minWidth: 0 }}>
-      <div style={{ color: D.sub, fontSize: '0.58rem', letterSpacing: '0.1em', fontWeight: 800 }}>{label.toUpperCase()}</div>
-      <div style={{ color, fontWeight: 900, fontSize: big ? '1.25rem' : '1rem', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value.toUpperCase()}</div>
+    <div style={{ flex: big ? '1.2 1 0' : '1 1 0', background: `${color}14`, border: `1px solid ${color}55`, borderRadius: 10, padding: '5px 9px', minWidth: 0 }}>
+      <div style={{ color: D.sub, fontSize: '0.5rem', letterSpacing: '0.08em', fontWeight: 800 }}>{label.toUpperCase()}</div>
+      <div style={{ color, fontWeight: 900, fontSize: big ? '0.92rem' : '0.8rem', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value.toUpperCase()}</div>
     </div>
   )
 }
