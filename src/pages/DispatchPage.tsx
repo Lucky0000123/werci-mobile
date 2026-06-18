@@ -19,7 +19,7 @@ import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
-import DispatchMap from '../components/DispatchMap'
+import NavMap from '../components/NavMap'
 
 // ── types ────────────────────────────────────────────────────────────────
 type AllowedAction = { action: 'connect_truck' | 'connect_excavator'; unit_type: string; label: string }
@@ -751,12 +751,6 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
   const [manual, setManual] = useState<{ status: string; reason?: string } | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
   const [gpsNote, setGpsNote] = useState(false)
-  const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
-  useEffect(() => {
-    const cb = (s: ConnectionStatus) => setOnline(s.isOnline)
-    connectionManager.addStatusListener(cb)
-    return () => connectionManager.removeStatusListener(cb)
-  }, [])
   const target = useRef(truckNo.trim().toUpperCase())
   useEffect(() => { target.current = truckNo.trim().toUpperCase() }, [truckNo])
 
@@ -908,25 +902,17 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dest?.lat, dest?.lng])
 
-  const gpsOk = !!truckPt
   const shiftDate = '—'   // shift/date not in operator-view yet — wire from the dispatch plan
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
 
-      {/* ── TOP STATUS BAR ── */}
-      <div style={{ ...panel, flexShrink: 0, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: 'monospace', fontSize: '1.5rem', fontWeight: 900, color: D.ink, lineHeight: 1, letterSpacing: '-0.02em' }}>{truck?.truck_no || truckNo}</div>
-          <div style={{ color: D.sub2, fontSize: '0.74rem', marginTop: 3 }}>{driverName || dt('driver')} · {dt('dump_truck')}</div>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 7, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <StatusPill ok={gpsOk} label={gpsOk ? 'GPS OK' : 'NO GPS'} />
-          <StatusPill ok label="RFID OK" />
-          <StatusPill ok={online} label={online ? 'ONLINE' : 'OFFLINE'} />
-        </div>
+      {/* ── slim header: operator · shift (no truck-number row, no status pills) ── */}
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 8, padding: '0 2px' }}>
+        <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem' }}>{driverName || dt('driver')}</span>
+        <span style={{ color: D.sub, fontSize: '0.72rem' }}>· {dt('dump_truck')}{shiftDate !== '—' ? ' · ' + shiftDate : ''}</span>
       </div>
 
-      {/* ── MIDDLE: (cycle + map) | (action · status · assignment) ── */}
+      {/* ── MIDDLE: (cycle + map + state chips) | (action · status · assignment) ── */}
       <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
         {/* LEFT */}
         <div style={{ flex: '1.4 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
@@ -942,8 +928,8 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
               </div>
             ) : (
               <>
-                <DispatchMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                             destKind={destKind} stateColor={curColor} route={routePts} roads={roads} height="100%" />
+                <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
+                        destKind={destKind} stateColor={curColor} route={routePts} roads={roads} height="100%" />
                 {speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -954,83 +940,82 @@ function TruckDriverWindow({ employeeId, truckNo, driverName }:
               </>
             )}
           </div>
+          {/* state chips — UNDER the map */}
+          <div style={{ flexShrink: 0, display: 'flex', gap: 8 }}>
+            <BottomChip label={dt('current_state')} value={nonOp ? dt('ms_' + manual!.status) : curLabel} color={nonOp ? (manualMeta(manual!.status)?.color || D.sub) : curColor} big />
+            <BottomChip label={dt('next_state')} value={nextLabel || '—'} color={nextColor} />
+            <BottomChip label={dt('next_location')} value={nextLocName} color={D.accent} />
+          </div>
         </div>
 
-        {/* RIGHT */}
-        <div style={{ flex: '1 1 0', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, overflowY: 'auto' }}>
+        {/* RIGHT — action · status · assignment (compact; no scroll) */}
+        <div style={{ flex: '1 1 0', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {err && !truck && <div style={{ ...panel, color: C.amber, flexShrink: 0 }}>{err}</div>}
 
           {!nonOp && (
-            <div style={{ ...panel, flexShrink: 0, padding: 12 }}>
+            <div style={{ ...panel, flexShrink: 0, padding: 10 }}>
               <SectionLabel icon="▸" text="OPERATOR ACTION" />
               {act ? (
                 <button onClick={() => run(act)} disabled={acting || (act.kind === 'first_bucket' && otherLoading)}
-                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 78, marginTop: 8 }}>
+                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 64, fontSize: '1.15rem', marginTop: 8 }}>
                   {acting ? dt('recording')
                     : (act.kind === 'first_bucket' && otherLoading) ? dt('another_loading')
                     : actLabel}
                 </button>
               ) : (
-                <div style={{ marginTop: 8, padding: 14, borderRadius: 12, background: D.panel2, border: `1px solid ${D.line}` }}>
-                  <div style={{ color: D.accent, fontWeight: 800, fontSize: '0.7rem', letterSpacing: '0.07em' }}>AWAITING EVENT</div>
-                  <div style={{ color: D.sub2, fontSize: '0.88rem', marginTop: 4 }}>
+                <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: D.panel2, border: `1px solid ${D.line}` }}>
+                  <div style={{ color: D.accent, fontWeight: 800, fontSize: '0.68rem', letterSpacing: '0.07em' }}>AWAITING EVENT</div>
+                  <div style={{ color: D.sub2, fontSize: '0.84rem', marginTop: 4 }}>
                     {st === 'loading' ? dt('loading_in_progress') : st === 'waiting' ? dt('waiting_bucket') : dt('no_action')}
                   </div>
                 </div>
               )}
-              {msg && msg !== '✓' && <div style={{ fontSize: '0.82rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 6 }}>{msg}</div>}
-              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              {msg && msg !== '✓' && <div style={{ fontSize: '0.8rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 6 }}>{msg}</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                 <button onClick={() => setStatusOpen(true)} style={secBtn}>Request Status Change</button>
                 <button onClick={() => setGpsNote((v) => !v)} style={secBtn}>Report GPS Unavailable</button>
               </div>
-              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.76rem', marginTop: 8 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
+              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.74rem', marginTop: 6 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
             </div>
           )}
 
           <div style={{ flexShrink: 0 }}>
-            <div style={{ color: D.sub, fontSize: '0.6rem', letterSpacing: '0.1em', fontWeight: 800, margin: '2px 2px 6px' }}>EQUIPMENT STATUS</div>
             <ManualStatusControl unitNo={truckNo} unitType="dump_truck" employeeId={employeeId}
                                  current={manual} open={statusOpen} onOpenChange={setStatusOpen}
                                  onChange={(status, reason) => setManual({ status, reason })} />
           </div>
 
-          <div style={{ ...panel, flexShrink: 0, padding: 12 }}>
+          {/* ASSIGNMENT — compact grid, fits without scrolling */}
+          <div style={{ ...panel, flexShrink: 0, padding: 10 }}>
             <SectionLabel icon="📍" text="ASSIGNMENT" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 }}>
-              <Tile k="Truck ID" v={truck?.truck_no || truckNo} />
-              <Tile k="Assigned Excavator" v={excavatorNo || '—'} />
-              <Tile k="Loading Source" v={loadingLoc || '—'} />
-              <Tile k="Dump Location" v={dumpLoc || '—'} />
-              <Tile k="Loaded Weighbridge" v="—" />
-              <Tile k="Empty Weighbridge" v="—" />
-              <Tile k="Sample House" v="—" />
-              <Tile k="Material" v="—" />
-              <Tile k="Plan ID" v={planId ? `#${planId}` : '—'} />
-              <Tile k="Shift / Date" v={shiftDate} />
-              <div style={{ gridColumn: '1 / -1' }}><Tile k="Next Location" v={nextLocName} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, marginTop: 6 }}>
+              <MiniTile k="Truck ID" v={truck?.truck_no || truckNo} />
+              <MiniTile k="Assigned Excavator" v={excavatorNo || '—'} />
+              <MiniTile k="Loading Source" v={loadingLoc || '—'} />
+              <MiniTile k="Dump Location" v={dumpLoc || '—'} />
+              <MiniTile k="Loaded Weighbridge" v="—" />
+              <MiniTile k="Empty Weighbridge" v="—" />
+              <MiniTile k="Sample House" v="—" />
+              <MiniTile k="Material" v="—" />
+              <MiniTile k="Plan ID" v={planId ? `#${planId}` : '—'} />
+              <MiniTile k="Shift / Date" v={shiftDate} />
+              <div style={{ gridColumn: '1 / -1' }}><MiniTile k="Next Location" v={nextLocName} /></div>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* ── BOTTOM: current / next / next-location ── */}
-      <div style={{ flexShrink: 0, display: 'flex', gap: 8 }}>
-        <BottomChip label={dt('current_state')} value={nonOp ? dt('ms_' + manual!.status) : curLabel} color={nonOp ? (manualMeta(manual!.status)?.color || D.sub) : curColor} big />
-        <BottomChip label={dt('next_state')} value={nextLabel || '—'} color={nextColor} />
-        <BottomChip label={dt('next_location')} value={nextLocName} color={D.accent} />
       </div>
     </div>
   )
 }
 
 // ── OUI presentational helpers (top-bar pills, cycle stepper, bottom chips) ──
-function StatusPill({ ok, label }: { ok: boolean; label: string }) {
-  const c = ok ? '#22C55E' : '#EF4444'
+// Compact assignment tile (denser than Tile) so the grid fits with no scroll.
+function MiniTile({ k, v }: { k: string; v: string }) {
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.62rem', fontWeight: 800,
-                   letterSpacing: '0.04em', color: c, background: `${c}1A`, border: `1px solid ${c}55`, padding: '4px 9px', borderRadius: 999 }}>
-      <span style={{ width: 6, height: 6, borderRadius: 999, background: c }} />{label}
-    </span>
+    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 8, padding: '4px 8px' }}>
+      <div style={{ color: D.sub, fontSize: '0.55rem', letterSpacing: '0.03em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
+      <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.8rem', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+    </div>
   )
 }
 function SectionLabel({ icon, text }: { icon: string; text: string }) {

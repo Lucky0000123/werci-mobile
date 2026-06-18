@@ -7,6 +7,18 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.16.0 — Truck OUI space cleanup. Dropped the top status bar (truck-number row
+ *          + GPS/RFID/ONLINE pills) → slim one-line header (operator · shift).
+ *          CURRENT / NEXT / NEXT-LOCATION chips moved UNDER the map; the right
+ *          column is now dedicated to OPERATOR ACTION · EQUIPMENT STATUS ·
+ *          ASSIGNMENT, with a compact assignment grid that fits with no scroll.
+ * 2.15.0 — Driver-view NAV map (MapLibre GL) in the truck OUI. Replaces the
+ *          Leaflet map: pitched (~60°), heading-up camera that FOLLOWS the truck
+ *          (Google-Maps driving view); the "road ahead" route line over the haul
+ *          roads (/api/dispatch/route), haul lanes (loaded/empty) + destination
+ *          geofence + heading vehicle marker, on a satellite basemap. Falls back
+ *          to the Leaflet DispatchMap if WebGL is unavailable. Drops into the
+ *          2.14.0 layout's map slot (speed overlay + cycle stepper unchanged).
  * 2.14.0 — Truck OUI redesign (prototype tablet layout). The dump-truck operator
  *          screen is now: a TOP STATUS BAR (truck no · driver · GPS/RFID/ONLINE
  *          pills), a 12-state CYCLE STEPPER above a big NAV MAP (left), an
@@ -111,4 +123,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.14.0'
+export const APP_VERSION = '2.15.0'
