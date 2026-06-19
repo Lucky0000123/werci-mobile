@@ -7,6 +7,15 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.27.0 — Professional FMS sign-on redesign. The in-cab "Connect Unit"
+ *          (employee ID + unit number) entry screen is rebuilt to look like a
+ *          real FMS product instead of a plain light form: a dark shell with a
+ *          PRISM FMS branded header band + ONLINE/OFFLINE status pill, a 2-step
+ *          progress indicator (Identify operator → Select unit), gold-accent
+ *          cards/buttons (matching the web _fms_shell.html palette), an operator
+ *          avatar (initials) with KIMPER status pill, glowing live-unit dots in
+ *          the unit dropdown, and a centred tablet-friendly column. Wiring
+ *          (identify → KIMPER → unit autocomplete → connect) is unchanged.
  * 2.26.0 — Removed the 3D twin map from the truck OUI. The driver map is now
  *          a single flat 2D nav view (MAP / STATUS toggle only) — heading-up,
  *          follows the truck, with the SITE ortho imagery + haul lanes + route
@@ -192,4 +201,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.26.0'
+export const APP_VERSION = '2.27.0'

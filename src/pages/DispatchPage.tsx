@@ -81,6 +81,16 @@ const D = {
   line2: '#3a3a3a', ink: '#ffffff', sub: '#9ca3af', sub2: '#d6d6d6',
   accent: '#38BDF8',
 }
+// Professional FMS palette for the sign-on / connect flow — dark shell with a
+// gold accent, aligned with the web FMS shell (_fms_shell.html: #0a0a0a base,
+// #f5a524 accent) so the in-cab tablet looks like one cohesive product.
+const F = {
+  bg: '#0a0c10', bg2: '#0f1218', panel: '#15181f', panelHi: '#1c2027',
+  line: 'rgba(255,255,255,0.10)', line2: 'rgba(255,255,255,0.18)',
+  ink: '#f8fafc', sub: '#94a3b8', sub2: '#cbd5e1',
+  gold: '#f5a524', goldHi: '#ffb635',
+  green: '#22c55e', amber: '#f59e0b', red: '#ef4444', blue: '#38bdf8',
+}
 
 // ── CYCLE v2 status palette (EXACT prototype hexes + labels) ──────────────
 type StateStyle = { color: string; label: string }
@@ -377,141 +387,204 @@ export default function DispatchPage() {
     )
   }
 
-  // ── identify / connect ──
+  // ── identify / connect — professional FMS sign-on ──
+  const kColor = statusColor(profile?.kimper_status)
   return (
-    <div style={{ minHeight: '100%', background: C.bg, padding: '16px 14px 90px' }}>
-      <h1 style={{ fontSize: '1.25rem', fontWeight: 800, color: C.ink, margin: '4px 2px 14px' }}>
-        {dt('title')}
-      </h1>
-
-      {!online && (
-        <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', color: '#92400E',
-                      borderRadius: 12, padding: '10px 14px', marginBottom: 12, fontSize: '0.84rem', fontWeight: 600 }}>
-          ⚠ {dt('offline_banner')}
+    <div style={{
+      minHeight: '100dvh', boxSizing: 'border-box', background: F.bg,
+      backgroundImage: `radial-gradient(1100px 520px at 50% -8%, rgba(245,165,36,0.10), transparent 60%),
+                        radial-gradient(900px 480px at 100% 110%, rgba(56,189,248,0.06), transparent 55%)`,
+      color: F.ink, padding: '0 0 96px', display: 'flex', flexDirection: 'column',
+    }}>
+      {/* ── branded header band ── */}
+      <header style={{
+        display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px',
+        borderBottom: `1px solid ${F.line}`, background: 'rgba(10,12,16,0.72)',
+        backdropFilter: 'blur(8px)', position: 'sticky', top: 0, zIndex: 30,
+      }}>
+        <img src={prismLogo} alt="PRISM" style={{ height: 34, width: 'auto' }} />
+        <div style={{ minWidth: 0, lineHeight: 1.15 }}>
+          <div style={{ fontWeight: 800, fontSize: '0.98rem', letterSpacing: '-0.01em' }}>
+            PRISM <span style={{ color: F.gold }}>FMS</span>
+          </div>
+          <div style={{ color: F.sub, fontSize: '0.72rem', fontWeight: 600 }}>Fleet Management · In-Cab Dispatch</div>
         </div>
-      )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7,
+                      fontSize: '0.72rem', fontWeight: 700, color: online ? F.green : F.amber,
+                      background: online ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+                      border: `1px solid ${online ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)'}`,
+                      borderRadius: 999, padding: '5px 12px', whiteSpace: 'nowrap' }}>
+          <span style={{ width: 7, height: 7, borderRadius: 999, background: online ? F.green : F.amber,
+                         boxShadow: `0 0 8px ${online ? F.green : F.amber}` }} />
+          {online ? 'ONLINE' : 'OFFLINE'}
+        </div>
+      </header>
 
-      {/* Step 1 — identify */}
-      {!profile && (
-        <div style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>{dt('enter_emp_id')}</label>
-            <button
-              type="button"
-              onClick={toggleIdKeyboard}
-              aria-label="Toggle keyboard"
-              style={{ padding: '5px 12px', fontSize: '0.78rem', fontWeight: 800, color: C.blue,
-                       background: '#EFF6FF', border: `1px solid ${C.blue}40`, borderRadius: 999, cursor: 'pointer' }}
-            >
-              {idMode === 'numeric' ? 'ABC' : '123'}
+      {/* ── centered content column (tablet-friendly) ── */}
+      <div style={{ width: '100%', maxWidth: 540, margin: '0 auto', padding: '18px 16px 0',
+                    display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+        {/* step indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 2px 0' }}>
+          {stepDot('1', !profile ? 'active' : 'done')}
+          <div style={{ flex: 1, height: 2, borderRadius: 2, background: profile ? F.gold : F.line2 }} />
+          {stepDot('2', profile ? 'active' : 'idle')}
+          <div style={{ marginLeft: 8, fontSize: '0.74rem', fontWeight: 700, color: F.sub, whiteSpace: 'nowrap' }}>
+            {!profile ? 'Identify operator' : 'Select unit'}
+          </div>
+        </div>
+
+        {!online && (
+          <div style={{ background: 'rgba(245,158,11,0.10)', border: `1px solid rgba(245,158,11,0.40)`,
+                        color: '#fcd34d', borderRadius: 14, padding: '11px 14px', fontSize: '0.82rem', fontWeight: 600 }}>
+            ⚠ {dt('offline_banner')}
+          </div>
+        )}
+
+        {/* Step 1 — identify */}
+        {!profile && (
+          <div style={fmsCard}>
+            <div style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: 2 }}>Operator sign-on</div>
+            <div style={{ color: F.sub, fontSize: '0.82rem', marginBottom: 16 }}>{dt('title')}</div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+              <label style={fmsLabel}>{dt('enter_emp_id')}</label>
+              <button
+                type="button"
+                onClick={toggleIdKeyboard}
+                aria-label="Toggle keyboard"
+                style={{ padding: '5px 13px', fontSize: '0.76rem', fontWeight: 800, color: F.gold,
+                         background: 'rgba(245,165,36,0.12)', border: `1px solid rgba(245,165,36,0.45)`,
+                         borderRadius: 999, cursor: 'pointer' }}
+              >
+                {idMode === 'numeric' ? 'ABC' : '123'}
+              </button>
+            </div>
+            <input
+              ref={idInputRef}
+              value={employeeId}
+              onChange={(e) => setEmployeeId(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && identify()}
+              placeholder="e.g. 8221118075"
+              autoFocus
+              inputMode={idMode}
+              style={fmsInput}
+            />
+            <button onClick={identify} disabled={loading || !employeeId.trim()} style={fmsPrimaryBtn(loading || !employeeId.trim())}>
+              {loading ? dt('checking') : dt('identify')}
             </button>
           </div>
-          <input
-            ref={idInputRef}
-            value={employeeId}
-            onChange={(e) => setEmployeeId(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && identify()}
-            placeholder="e.g. 8221118075"
-            autoFocus
-            inputMode={idMode}
-            style={inputStyle}
-          />
-          <button onClick={identify} disabled={loading || !employeeId.trim()} style={primaryBtn(loading || !employeeId.trim())}>
-            {loading ? dt('checking') : dt('identify')}
-          </button>
-        </div>
-      )}
+        )}
 
-      {/* Step 2 — employee card + unit dropdown */}
-      {profile && (
-        <>
-          <div style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: C.ink }}>{profile.name || '—'}</div>
-                <div style={{ color: C.sub, fontSize: '0.85rem' }}>ID {profile.employee_id}</div>
-                {profileOffline && <div style={{ color: C.amber, fontSize: '0.72rem', fontWeight: 700 }}>{dt('from_saved')}</div>}
-                <div style={{ color: C.sub, fontSize: '0.8rem' }}>
-                  {[profile.company, profile.department].filter(Boolean).join(' · ')}
+        {/* Step 2 — employee card + unit dropdown */}
+        {profile && (
+          <>
+            <div style={fmsCard}>
+              <div style={{ display: 'flex', gap: 13, alignItems: 'center' }}>
+                {/* operator avatar (initials) */}
+                <div style={{ width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '1.2rem', fontWeight: 800, color: F.gold,
+                              background: 'rgba(245,165,36,0.12)', border: `1px solid rgba(245,165,36,0.35)` }}>
+                  {(profile.name || profile.employee_id).trim().slice(0, 2).toUpperCase()}
                 </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '1.12rem', fontWeight: 800, color: F.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {profile.name || '—'}
+                  </div>
+                  <div style={{ color: F.sub, fontSize: '0.82rem' }}>ID {profile.employee_id}</div>
+                  {[profile.company, profile.department].filter(Boolean).length > 0 && (
+                    <div style={{ color: F.sub, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {[profile.company, profile.department].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                  {profileOffline && <div style={{ color: F.amber, fontSize: '0.7rem', fontWeight: 700, marginTop: 2 }}>{dt('from_saved')}</div>}
+                </div>
+                <span style={{ ...fmsPill(kColor), alignSelf: 'flex-start' }}>
+                  KIMPER {profile.kimper_status || '—'}
+                </span>
               </div>
-              <span style={badge(statusColor(profile.kimper_status))}>
-                KIMPER {profile.kimper_status || '—'}
-              </span>
-            </div>
 
-            <div style={{ marginTop: 12 }}>
-              <div style={labelStyle}>{dt('authorized_to_operate')}</div>
+              <div style={{ height: 1, background: F.line, margin: '14px -18px' }} />
+
+              <div style={fmsLabel}>{dt('authorized_to_operate')}</div>
               {profile.allowed_type_labels.length ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 7 }}>
                   {profile.allowed_type_labels.map((t) => (
-                    <span key={t} style={chip(C.blue)}>{t}</span>
+                    <span key={t} style={fmsChip(F.blue)}>{t}</span>
                   ))}
                 </div>
               ) : (
-                <div style={{ color: C.amber, fontSize: '0.85rem', marginTop: 4 }}>
+                <div style={{ color: F.amber, fontSize: '0.84rem', marginTop: 7, fontWeight: 600 }}>
                   {dt('no_authorization')}
                 </div>
               )}
             </div>
-          </div>
 
-          {/* unit number → dropdown → auto-detect type → connect.
-              ALWAYS shown — a driver is never blocked by KIMPER from connecting;
-              an advisory note appears below when the licence does not list it. */}
-          <div style={cardStyle}>
-              <label style={labelStyle}>{dt('which_unit')}</label>
-              <div style={{ position: 'relative' }}>
+            {/* unit number → dropdown → auto-detect type → connect.
+                ALWAYS shown — a driver is never blocked by KIMPER from connecting;
+                an advisory note appears below when the licence does not list it. */}
+            <div style={fmsCard}>
+              <label style={fmsLabel}>{dt('which_unit')}</label>
+              <div style={{ position: 'relative', marginTop: 7 }}>
                 <input
                   value={unitNo}
                   onChange={(e) => { setUnitNo(e.target.value.toUpperCase()); setSelectedType(null); setShowDrop(true) }}
                   onFocus={() => setShowDrop(true)}
                   onKeyDown={(e) => e.key === 'Enter' && connectUnit(unitNo, selectedType)}
                   placeholder={dt('unit_placeholder')}
-                  style={inputStyle}
+                  style={{ ...fmsInput, marginBottom: 0, fontWeight: 700, letterSpacing: '0.04em' }}
                   autoComplete="off"
                 />
                 {showDrop && unitNo.trim() && (suggestions.length > 0 || searching) && (
-                  <div style={dropStyle}>
+                  <div style={fmsDrop}>
                     {searching && suggestions.length === 0 && (
-                      <div style={{ padding: '10px 14px', color: C.sub, fontSize: '0.85rem' }}>{dt('searching')}</div>
+                      <div style={{ padding: '11px 14px', color: F.sub, fontSize: '0.84rem' }}>{dt('searching')}</div>
                     )}
                     {suggestions.map((s) => (
                       <button key={s.unit_no} onClick={() => { setUnitNo(s.unit_no); setSelectedType(s.type); connectUnit(s.unit_no, s.type) }}
-                              style={dropItem}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 999, background: s.live ? C.green : C.sub, flexShrink: 0 }} />
-                          <span style={{ fontWeight: 700, color: C.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.unit_no}</span>
+                              style={fmsDropItem}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0,
+                                         background: s.live ? F.green : F.sub,
+                                         boxShadow: s.live ? `0 0 7px ${F.green}` : 'none' }} />
+                          <span style={{ fontWeight: 800, color: F.ink, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.unit_no}</span>
                         </span>
-                        <span style={chip(s.type === 'excavator' ? '#0f8a8a' : C.blue)}>{s.type_label}</span>
+                        <span style={fmsChip(s.type === 'excavator' ? '#2dd4bf' : F.blue)}>{s.type_label}</span>
                       </button>
                     ))}
                   </div>
                 )}
               </div>
-              <div style={{ color: C.sub, fontSize: '0.76rem', marginTop: -4, marginBottom: 8 }}>
+              <div style={{ color: F.sub, fontSize: '0.76rem', marginTop: 8, marginBottom: 12 }}>
                 {dt('pick_hint')}
               </div>
               {supportedAllowed.length === 0 && (
-                <div style={{ color: C.amber, fontSize: '0.78rem', fontWeight: 600, marginTop: -2, marginBottom: 8 }}>
+                <div style={{ color: '#fcd34d', fontSize: '0.78rem', fontWeight: 600, marginTop: -4, marginBottom: 12,
+                              background: 'rgba(245,158,11,0.10)', border: `1px solid rgba(245,158,11,0.35)`,
+                              borderRadius: 10, padding: '9px 12px' }}>
                   ⚠ {dt('not_auth_advisory')}
                 </div>
               )}
               <button onClick={() => connectUnit(unitNo, selectedType)} disabled={loading || !unitNo.trim()}
-                      style={primaryBtn(loading || !unitNo.trim())}>
+                      style={fmsPrimaryBtn(loading || !unitNo.trim())}>
                 {loading ? dt('connecting') : selectedType
                   ? `${dt('connect')} ${unitNo} · ${selectedType === 'excavator' ? dt('excavator') : dt('dump_truck')}`
                   : dt('connect')}
               </button>
             </div>
 
-          <button onClick={reset} style={ghostBtn}>{dt('different_emp')}</button>
-        </>
-      )}
+            <button onClick={reset} style={fmsGhostBtn}>{dt('different_emp')}</button>
+          </>
+        )}
 
-      {error && (
-        <div style={{ ...cardStyle, borderLeft: `4px solid ${C.red}`, color: C.red }}>{error}</div>
-      )}
+        {error && (
+          <div style={{ ...fmsCard, borderColor: 'rgba(239,68,68,0.5)', background: 'rgba(239,68,68,0.08)',
+                        color: '#fca5a5', fontWeight: 600, fontSize: '0.86rem' }}>
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1053,37 +1126,67 @@ function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, 
 }
 
 // ── styles ────────────────────────────────────────────────────────────────
-const cardStyle: React.CSSProperties = {
-  background: C.card, borderRadius: 16, padding: 16, marginBottom: 12,
-  border: `1px solid ${C.line}`, boxShadow: '0 6px 18px rgba(15,23,42,0.05)',
+// ── FMS sign-on style helpers (dark shell, gold accent — matches web FMS) ──
+const fmsCard: React.CSSProperties = {
+  background: F.panel, borderRadius: 16, padding: 18,
+  border: `1px solid ${F.line}`, boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
 }
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: '0.78rem', fontWeight: 700, color: C.sub,
-  textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 6,
+const fmsLabel: React.CSSProperties = {
+  display: 'block', fontSize: '0.74rem', fontWeight: 800, color: F.sub,
+  textTransform: 'uppercase', letterSpacing: '0.06em',
 }
-const inputStyle: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '14px 14px', fontSize: '1.05rem',
-  border: `1px solid ${C.line}`, borderRadius: 12, marginBottom: 12, outline: 'none',
+const fmsInput: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '15px 15px', fontSize: '1.1rem',
+  color: F.ink, background: F.bg2, border: `1px solid ${F.line2}`, borderRadius: 12,
+  marginBottom: 14, outline: 'none', WebkitTextFillColor: F.ink as unknown as string,
 }
-const dropStyle: React.CSSProperties = {
-  position: 'absolute', top: 'calc(100% - 4px)', left: 0, right: 0, zIndex: 20,
-  background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12,
-  boxShadow: '0 12px 28px rgba(15,23,42,0.16)', overflow: 'hidden', maxHeight: 280, overflowY: 'auto',
+const fmsDrop: React.CSSProperties = {
+  position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 20,
+  background: F.panelHi, border: `1px solid ${F.line2}`, borderRadius: 12,
+  boxShadow: '0 18px 40px rgba(0,0,0,0.5)', overflow: 'hidden', maxHeight: 280, overflowY: 'auto',
 }
-const dropItem: React.CSSProperties = {
+const fmsDropItem: React.CSSProperties = {
   width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-  padding: '11px 14px', background: 'transparent', border: 'none', borderBottom: `1px solid ${C.line}`,
+  padding: '12px 14px', background: 'transparent', border: 'none', borderBottom: `1px solid ${F.line}`,
   cursor: 'pointer', textAlign: 'left',
+}
+function fmsPrimaryBtn(disabled: boolean): React.CSSProperties {
+  return {
+    width: '100%', padding: '15px', fontSize: '1.02rem', fontWeight: 800, letterSpacing: '0.01em',
+    color: disabled ? '#64748b' : '#1a1205',
+    background: disabled ? '#1f2937' : `linear-gradient(180deg, ${F.goldHi}, ${F.gold})`,
+    border: disabled ? `1px solid ${F.line}` : 'none', borderRadius: 12,
+    cursor: disabled ? 'default' : 'pointer', marginTop: 2,
+    boxShadow: disabled ? 'none' : '0 8px 22px rgba(245,165,36,0.28)',
+  }
+}
+const fmsGhostBtn: React.CSSProperties = {
+  width: '100%', padding: '13px', fontSize: '0.9rem', fontWeight: 700, color: F.sub,
+  background: 'transparent', border: `1px solid ${F.line}`, borderRadius: 12, marginTop: 2, cursor: 'pointer',
+}
+function fmsPill(color: string): React.CSSProperties {
+  return { fontSize: '0.68rem', fontWeight: 800, color, background: `${color}22`,
+           border: `1px solid ${color}66`, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }
+}
+function fmsChip(color: string): React.CSSProperties {
+  return { fontSize: '0.72rem', fontWeight: 700, color, background: `${color}1F`,
+           border: `1px solid ${color}55`, padding: '5px 11px', borderRadius: 999, whiteSpace: 'nowrap' }
+}
+function stepDot(n: string, state: 'idle' | 'active' | 'done'): React.ReactNode {
+  const isActive = state === 'active', isDone = state === 'done'
+  return (
+    <span style={{
+      width: 24, height: 24, borderRadius: 999, flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '0.74rem', fontWeight: 800,
+      color: isActive ? '#1a1205' : isDone ? F.gold : F.sub,
+      background: isActive ? F.gold : isDone ? 'rgba(245,165,36,0.15)' : 'transparent',
+      border: `1px solid ${isActive || isDone ? F.gold : F.line2}`,
+    }}>{isDone ? '✓' : n}</span>
+  )
 }
 const panel: React.CSSProperties = {
   background: D.panel, border: `1px solid ${D.line}`, borderRadius: 14, padding: 14,
-}
-function primaryBtn(disabled: boolean, color: string = C.blue): React.CSSProperties {
-  return {
-    width: '100%', padding: '14px', fontSize: '1rem', fontWeight: 700, color: '#fff',
-    background: disabled ? '#94A3B8' : color, border: 'none', borderRadius: 12,
-    cursor: disabled ? 'default' : 'pointer', marginTop: 4,
-  }
 }
 function bigBtn(color: string, disabled: boolean): React.CSSProperties {
   return {
@@ -1101,9 +1204,6 @@ function darkBtn(color: string): React.CSSProperties {
 const ghostBtn: React.CSSProperties = {
   width: '100%', padding: '12px', fontSize: '0.9rem', fontWeight: 600, color: C.sub,
   background: 'transparent', border: 'none', marginTop: 4, cursor: 'pointer',
-}
-function badge(color: string): React.CSSProperties {
-  return { fontSize: '0.7rem', fontWeight: 800, color: '#fff', background: color, padding: '4px 9px', borderRadius: 999, whiteSpace: 'nowrap' }
 }
 function chip(color: string): React.CSSProperties {
   return { fontSize: '0.72rem', fontWeight: 700, color, background: `${color}1F`, border: `1px solid ${color}55`, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }
