@@ -34,6 +34,11 @@ body.qr-scanning .app-main {
   color: var(--prism-text-primary);
 }
 
+/* Pages that hide the AppHeader (e.g. /dispatch full-screen mode) */
+.app-main.no-header {
+  padding-top: 0;
+}
+
 .app-main.with-bottom-nav {
   padding-bottom: calc(112px + env(safe-area-inset-bottom)); /* Bottom nav height + padding */
 }

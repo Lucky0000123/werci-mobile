@@ -10,6 +10,7 @@ import {
 
 interface LoginPageProps {
   onLoginSuccess: (user: AuthenticatedUser) => void
+  onBack?: () => void
 }
 
 const containerVariants = {
@@ -29,7 +30,7 @@ const itemVariants = {
   }
 } as const
 
-export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
+export default function LoginPage({ onLoginSuccess, onBack }: LoginPageProps) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -250,6 +251,16 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
               </motion.div>
             )}
           </form>
+
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              style={{ marginTop: '16px', width: '100%', padding: '10px', background: 'transparent', border: 'none', color: '#64748b', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              ← Back to mode selection
+            </button>
+          )}
         </motion.div>
       </motion.div>
     </div>

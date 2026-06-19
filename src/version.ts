@@ -7,6 +7,29 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.24.0 — In-cab OUI hardening + 3D twin map. (1) A driver is NEVER blocked
+ *          from connecting to any excavator/dump truck — expired/again-missing
+ *          KIMPER only raises a visible warning chip, never a dead-end. (2) The
+ *          excavator screen's manual STATUS selector (breakdown/standby/…) is now
+ *          always pinned & visible — the plan-details panel absorbs the squeeze
+ *          instead of pushing it off-screen. (3) BOTH operator screens are locked
+ *          to a fixed viewport (body.oui-locked: no overscroll/pan/bounce/scroll).
+ *          (4) Truck haul-cycle now ENTERS at "Travelling Empty" the moment a
+ *          truck is assigned, then follows queue→spot→loading→… with the active
+ *          stage highlighted on the wheel (backend DISPATCH_CYCLE_V2 turned on in
+ *          prod). (5) New 3D map mode on the truck OUI — a MAP / 3D / STATUS
+ *          toggle; 3D drapes the satellite + haul roads over real terrain
+ *          (raster-DEM + sky) on the same MapLibre instance.
+ * 2.23.1 — Status view layout fix: the haul-cycle wheel was taking over the
+ *          whole screen (the top bar AND the right data column were hidden in
+ *          STATUS mode). Now STATUS only swaps the LEFT map box for the wheel —
+ *          the top bar and the right column (Operator Action / Manual Status /
+ *          Assignment) stay visible, so the wheel sits inside its box like the
+ *          Map does and no longer hides the rest of the OUI.
+ * 2.23.0 — Excavator OUI redesign (prototype ExcavatorOuiPanel): dark in-cab
+ *          shell with summary tiles (current/next/queue), large amber FULL button,
+ *          queue grid, plan details, and machine-availability modal. Replaces the
+ *          inline ExcavatorOperatorWindow in DispatchPage.
  * 2.22.0 — Status view fit + bigger Waiting Event: the dump-truck Status view
  *          now renders the haul-cycle wheel as a TRUE square that fits INSIDE
  *          the same box the Map uses (measured, never stretched). The redundant
@@ -156,4 +179,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.22.0'
+export const APP_VERSION = '2.24.0'

@@ -13,7 +13,6 @@
 // mirrors the prototype exactly. Manual statuses (delay / standby / breakdown /
 // maintenance) post to /api/dispatch/equipment-status and never break the cycle.
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
-import type { JSX } from 'react'
 import { apiFetch } from '../services/api'
 import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
@@ -21,6 +20,7 @@ import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
 import NavMap from '../components/NavMap'
 import { TruckStatusPanel } from '../components/TruckStatusPanel'
+import ExcavatorOuiPanel from '../components/ExcavatorOuiPanel'
 import type { Assignment, StatusState } from '../components/TruckStatusPanel'
 import prismLogo from '../assets/Logo1_splash.png'
 
@@ -62,6 +62,7 @@ const WARN_LABELS: Record<string, string> = {
   kimper_expired: 'KIMPER EXPIRED',
   kimper_expiring_soon: 'KIMPER expiring soon',
   kimper_no_date: 'KIMPER has no expiry date',
+  not_authorized_type: 'Not on KIMPER for this equipment',
   unit_unknown: 'Unit not seen in live GPS yet (will link once it reports)',
   unit_offline: 'Unit currently offline in GPS',
   unit_type_mismatch: 'Entered unit type does not match the connect type',
@@ -99,13 +100,6 @@ const STATE_STYLE: Record<string, StateStyle> = {
 }
 // Cycle progress is shown by the Status-view haul-cycle wheel (TruckStatusPanel),
 // which maps the 12 operator states onto the 8 wheel segments + colour legend.
-const EXC_STATE_STYLE: Record<string, StateStyle> = {
-  loading: { color: '#FF4FB8', label: 'Loading' },
-  waiting: { color: '#FFE600', label: 'Ready / Operating' },
-  idle:    { color: '#94A3B8', label: 'Standby' },
-  delay:   { color: '#F97316', label: 'Delay' },
-  down:    { color: '#EF4444', label: 'Down' },
-}
 // Truck DRIVER primary action per state (from the prototype's truckActionButtons).
 // kind 'first_bucket' → POST /loading/start; 'advance' → POST /cycle-advance to `next`.
 type DriverAct = { label: string; color: string; kind: 'first_bucket' | 'advance'; next: string }
@@ -139,12 +133,6 @@ const STATUS_REASONS: Record<string, string[]> = {
 }
 function manualMeta(s?: string) { return MANUAL_STATUSES.find((m) => m.value === s) }
 
-function stateRank(s?: string): number {
-  if (s === 'loading') return 0
-  if (s === 'spot') return 1
-  if (s === 'waiting') return 2
-  return 3
-}
 function statusColor(s?: string) {
   if (s === 'EXPIRED' || s === 'NO_KIMPER') return C.red
   if (s === 'EXPIRING_SOON' || s === 'NO_DATE') return C.amber
@@ -158,16 +146,6 @@ function inkOn(hex: string): string {
   const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16)
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   return lum > 0.6 ? '#0F172A' : '#ffffff'
-}
-function clock(sec?: number | null) {
-  if (sec == null) return '—'
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-function fmtAgo(sec?: number | null) {
-  if (sec == null) return '—'
-  if (sec < 60) return `${Math.floor(sec)}s`
-  return `${Math.floor(sec / 60)}m`
 }
 
 export default function DispatchPage() {
@@ -185,7 +163,7 @@ export default function DispatchPage() {
   const [result, setResult] = useState<ConnectResult | null>(null)
   const [connectedUnit, setConnectedUnit] = useState('')
   const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
-  const [viewMode, setViewMode] = useState<'map' | 'status'>('map')
+  const [viewMode, setViewMode] = useState<'map' | '3d' | 'status'>('map')
   // Employee-ID keyboard: numeric by default (IDs are mostly digits), with an
   // in-app 123/ABC toggle since the OS numeric pad has no letter switch.
   const [idMode, setIdMode] = useState<'numeric' | 'text'>('numeric')
@@ -238,7 +216,10 @@ export default function DispatchPage() {
     setSearching(true)
     const h = setTimeout(async () => {
       try {
-        const types = (supportedAllowed.length ? supportedAllowed : SUPPORTED_TYPES).join(',')
+        // Always offer ALL supported equipment (excavator + dump_truck). KIMPER
+        // authorization never limits what a driver may connect to — it only adds
+        // an advisory warning on connect.
+        const types = SUPPORTED_TYPES.join(',')
         const r = await apiFetch(`/api/dispatch/units?q=${encodeURIComponent(q)}&types=${types}&limit=10`)
         const d = await r.json()
         if (!alive) return
@@ -267,16 +248,14 @@ export default function DispatchPage() {
           t = rd?.tms?.asset_type || null
         } catch { /* offline / unknown */ }
       }
-      // narrow to an authorized supported type
-      if (!t || !supportedAllowed.includes(t)) {
-        if (supportedAllowed.length === 1) t = supportedAllowed[0]          // unambiguous
-        else if (t && !supportedAllowed.includes(t)) {
-          setError(`${profile.name || profile.employee_id} ${dt('not_auth_unit_type')}`)
-          setLoading(false); return
-        } else {
-          setError(dt('detect_fail'))
-          setLoading(false); return
-        }
+      // Choose the connect endpoint type. A driver is NEVER blocked here — KIMPER
+      // authorization is advisory only (the server attaches a warning, never
+      // refuses). Resolve the type from: the picked suggestion → live detection →
+      // the operator's single authorized type → fall back to dump_truck.
+      if (!t || !SUPPORTED_TYPES.includes(t)) {
+        if (supportedAllowed.length === 1) t = supportedAllowed[0]            // one authorized type
+        else if (supportedAllowed.length > 1) t = supportedAllowed[0]         // default to first authorized
+        else t = 'dump_truck'                                                 // no auth listed — still allow
       }
       const path = t === 'excavator' ? '/api/dispatch/connect-excavator' : '/api/dispatch/connect-truck'
       const r = await apiFetch(path, {
@@ -339,15 +318,24 @@ export default function DispatchPage() {
     return null
   })()
 
+  // Lock the WebView to a fixed viewport while an operator window is open so the
+  // in-cab truck/excavator screens can't be dragged, bounced, or page-scrolled
+  // (body.oui-locked in index.css pins inset:0 + overflow:hidden + touch-action).
+  const ouiOpen = !!(profile && connection)
+  useEffect(() => {
+    if (ouiOpen) document.body.classList.add('oui-locked')
+    else document.body.classList.remove('oui-locked')
+    return () => document.body.classList.remove('oui-locked')
+  }, [ouiOpen])
+
   // ── connected: full-screen operator window ──
   if (profile && connection) {
     const isExc = connection.unit_type === 'excavator'
     return (
       <div style={{ height: '100dvh', boxSizing: 'border-box', background: D.bg,
                     padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
-        {/* compact top bar — logo, name, warnings, switch/end */}
-        {viewMode !== 'status' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {/* compact top bar — logo, name, warnings, switch/end (always shown) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             <img src={prismLogo} alt="PRISM" style={{ height: 28, width: 'auto', flexShrink: 0 }} />
             <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8, overflow: 'hidden' }}>
               <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -357,7 +345,9 @@ export default function DispatchPage() {
             </div>
             {connection.warnings.length > 0 && (
               <div style={{ display: 'flex', gap: 6, overflow: 'hidden' }}>
-                {connection.warnings.slice(0, 2).map((w) => (
+                {[...connection.warnings]
+                  .sort((a, b) => (b.startsWith('kimper_expired') ? 1 : 0) - (a.startsWith('kimper_expired') ? 1 : 0))
+                  .slice(0, 3).map((w) => (
                   <span key={w} style={chip(w.startsWith('kimper_expired') || w === 'unit_already_paired' ? C.red : C.amber)}>{WARN_LABELS[w] || w}</span>
                 ))}
               </div>
@@ -373,12 +363,11 @@ export default function DispatchPage() {
               </button>
             </div>
           </div>
-        )}
 
         {/* OUI fills the rest — single screen, no page scroll */}
         <div style={{ flex: 1, minHeight: 0 }}>
           {isExc ? (
-            <ExcavatorOperatorWindow employeeId={profile.employee_id} excavatorNo={connection.unit_no} operatorName={profile.name} />
+            <ExcavatorOuiPanel employeeId={profile.employee_id} excavatorNo={connection.unit_no} operatorName={profile.name} />
           ) : (
             <TruckDriverWindow employeeId={profile.employee_id} truckNo={connection.unit_no} driverName={profile.name}
                                viewMode={viewMode} setViewMode={setViewMode} />
@@ -467,9 +456,10 @@ export default function DispatchPage() {
             </div>
           </div>
 
-          {/* unit number → dropdown → auto-detect type → connect */}
-          {supportedAllowed.length > 0 ? (
-            <div style={cardStyle}>
+          {/* unit number → dropdown → auto-detect type → connect.
+              ALWAYS shown — a driver is never blocked by KIMPER from connecting;
+              an advisory note appears below when the licence does not list it. */}
+          <div style={cardStyle}>
               <label style={labelStyle}>{dt('which_unit')}</label>
               <div style={{ position: 'relative' }}>
                 <input
@@ -502,6 +492,11 @@ export default function DispatchPage() {
               <div style={{ color: C.sub, fontSize: '0.76rem', marginTop: -4, marginBottom: 8 }}>
                 {dt('pick_hint')}
               </div>
+              {supportedAllowed.length === 0 && (
+                <div style={{ color: C.amber, fontSize: '0.78rem', fontWeight: 600, marginTop: -2, marginBottom: 8 }}>
+                  ⚠ {dt('not_auth_advisory')}
+                </div>
+              )}
               <button onClick={() => connectUnit(unitNo, selectedType)} disabled={loading || !unitNo.trim()}
                       style={primaryBtn(loading || !unitNo.trim())}>
                 {loading ? dt('connecting') : selectedType
@@ -509,11 +504,6 @@ export default function DispatchPage() {
                   : dt('connect')}
               </button>
             </div>
-          ) : (
-            <div style={{ ...cardStyle, color: C.sub }}>
-              {dt('not_auth_truck_exc')}
-            </div>
-          )}
 
           <button onClick={reset} style={ghostBtn}>{dt('different_emp')}</button>
         </>
@@ -541,207 +531,13 @@ type OpExcavator = {
   dump_lat?: number | null; dump_lng?: number | null; dump_zone_m?: number
   exc_status?: string; exc_status_color?: string; exc_status_label?: string; next_truck_no?: string | null
 } | null
-type OpView = {
-  has_plan: boolean
-  excavator?: OpExcavator
-  zones?: { loading_m?: number; waiting_m?: number }
-  trucks: OpTruck[]
-}
-
-function stateChip(t: OpTruck, dark = false): JSX.Element {
-  const v2 = t.state ? STATE_STYLE[t.state] : undefined
-  if (t.state) {
-    const color = t.state_color || v2?.color || (dark ? D.sub : C.sub)
-    const label = (t.state_label || v2?.label || t.state).toUpperCase()
-    return <span style={chip(color)}>{label}</span>
-  }
-  const label = (t.zone || 'unknown').toUpperCase()
-  const color = t.zone === 'loading' ? C.green : t.zone === 'waiting' ? C.amber : (dark ? D.sub : C.sub)
-  return <span style={chip(color)}>{label}</span>
-}
-
-// ════════════════════════════════════════════════════════════════════════
-//  EXCAVATOR OPERATOR WINDOW
-// ════════════════════════════════════════════════════════════════════════
-function ExcavatorOperatorWindow({ employeeId, excavatorNo, operatorName }:
-  { employeeId: string; excavatorNo: string; operatorName?: string }) {
-  const dt = useDispatchT()
-  const [view, setView] = useState<OpView | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [acting, setActing] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [manual, setManual] = useState<{ status: string; reason?: string } | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    async function tick() {
-      try {
-        const r = await apiFetch(`/api/dispatch/operator-view?employee_id=${encodeURIComponent(employeeId)}`)
-        const d = await r.json()
-        if (!alive) return
-        if (d.success) { setView(d as OpView); setErr(null) } else setErr(d.message || 'unavailable')
-      } catch { if (alive) setErr('network error') }
-    }
-    tick()
-    const h = setInterval(tick, 6000)
-    return () => { alive = false; clearInterval(h) }
-  }, [employeeId])
-
-  useEffect(() => {
-    let alive = true
-    apiFetch(`/api/dispatch/equipment-status?unit_no=${encodeURIComponent(excavatorNo)}`)
-      .then((r) => r.json()).then((d) => { if (alive && d.success && d.status) setManual(d.status) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [excavatorNo])
-
-  const planId = view?.excavator?.plan_id
-  const trucks = (view?.trucks || []).slice().sort((a, b) =>
-    (stateRank(a.state) - stateRank(b.state)) || ((a.distance_m ?? 1e9) - (b.distance_m ?? 1e9)))
-  const loadingTruck = trucks.find((t) => t.state === 'loading') || null
-  const queue = trucks.filter((t) => t.state !== 'loading')
-  const nextNo = view?.excavator?.next_truck_no
-  const lz = view?.zones?.loading_m ?? view?.excavator?.loading_zone_m
-  const wz = view?.zones?.waiting_m ?? view?.excavator?.waiting_zone_m
-  const excSt = view?.excavator?.exc_status
-  const excStyle = excSt ? EXC_STATE_STYLE[excSt] : undefined
-
-  const nonOp = manual && manual.status !== 'operating'
-  const headColor = nonOp ? (manualMeta(manual!.status)?.color || D.sub)
-    : (view?.excavator?.exc_status_color || excStyle?.color || D.sub)
-  const headLabel = nonOp ? dt('ms_' + manual!.status)
-    : (excStyle?.label || excSt || '—')
-
-  async function full() {
-    if (!planId || !loadingTruck) return
-    setActing(true); setMsg('')
-    try {
-      const r = await apiFetch('/api/dispatch/loading/finish', {
-        method: 'POST',
-        body: JSON.stringify({ plan_id: planId, truck_no: loadingTruck.truck_no, excavator_no: excavatorNo }),
-      })
-      const d = await r.json()
-      setMsg(r.ok && d.success ? `Loaded ✓ ${loadingTruck.truck_no} → Full Travel 1` : (d.message || 'Finish failed'))
-    } catch { setMsg('Network error') } finally { setActing(false) }
-  }
-
-  return (
-    <div style={{ height: '100%', display: 'flex', gap: 10, minHeight: 0 }}>
-      {/* LEFT: header · current loading · queue */}
-      <div style={{ flex: '1.05 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-        <div style={{ ...panel, flexShrink: 0, padding: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: 'monospace', fontSize: '1.4rem', fontWeight: 800, color: D.ink, letterSpacing: '-0.02em' }}>{excavatorNo}</div>
-              <div style={{ color: D.sub2, fontSize: '0.74rem' }}>{operatorName || dt('operator')} · {dt('excavator')}
-                {lz != null && wz != null ? ` · ${lz}/${wz} m` : ''}</div>
-            </div>
-            <span style={solidBadge(headColor)}>{headLabel.toUpperCase()}</span>
-          </div>
-        </div>
-
-        {err && !view && <div style={{ ...panel, color: C.amber, flexShrink: 0 }}>{err}</div>}
-        {view && !view.has_plan && <div style={{ ...panel, color: D.sub2, flexShrink: 0 }}>{dt('no_active_plan')}</div>}
-
-        {!nonOp && view?.has_plan && (
-          <>
-            <div style={{ ...panel, flexShrink: 0, padding: 12, border: `1px solid ${STATE_STYLE.loading.color}55`, background: `${STATE_STYLE.loading.color}12` }}>
-              <div style={{ color: STATE_STYLE.loading.color, fontWeight: 800, fontSize: '0.7rem', letterSpacing: '0.08em', marginBottom: 6 }}>{dt('current_loading')}</div>
-              {loadingTruck ? (
-                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ color: D.sub, fontSize: '0.62rem', letterSpacing: '0.08em' }}>{dt('truck')}</div>
-                    <div style={{ fontFamily: 'monospace', fontSize: '2.2rem', fontWeight: 800, color: D.ink, lineHeight: 1 }}>{loadingTruck.truck_no}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ color: D.sub, fontSize: '0.62rem', letterSpacing: '0.08em' }}>{dt('loading_cap')}</div>
-                    <div style={{ fontFamily: 'monospace', fontSize: '2.2rem', fontWeight: 800, color: D.ink, lineHeight: 1 }}>{clock(loadingTruck.time_in_state_s)}</div>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.95rem' }}>⏳ {dt('waiting_first_bucket')}</div>
-              )}
-            </div>
-
-            {/* queue — fills, internal scroll only */}
-            <div style={{ ...panel, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
-                <div style={{ color: D.ink, fontWeight: 800, fontSize: '0.76rem', letterSpacing: '0.04em' }}>{dt('queue')}</div>
-                {nextNo && <span style={chip('#FFE600')}>{dt('next')}: {nextNo}</span>}
-              </div>
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                {queue.length === 0 && <div style={{ color: D.sub, fontSize: '0.84rem' }}>{dt('no_trucks_feed')}</div>}
-                {queue.map((t) => (
-                  <div key={t.truck_no} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '7px 10px', marginBottom: 6, borderRadius: 10,
-                    border: `1px solid ${t.truck_no === nextNo ? '#FFE60066' : D.line}`,
-                    background: t.truck_no === nextNo ? '#FFE6000F' : D.panel2,
-                  }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontFamily: 'monospace', fontWeight: 700, color: D.ink }}>{t.truck_no}</div>
-                      <div style={{ color: D.sub, fontSize: '0.72rem' }}>{t.driver_name || '—'}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      {stateChip(t, true)}
-                      <div style={{ color: D.sub, fontSize: '0.72rem', marginTop: 2 }}>
-                        {t.distance_m != null ? `${Math.round(t.distance_m)} m` : ''}{t.time_in_state_s != null ? ` · ${fmtAgo(t.time_in_state_s)}` : ''}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* RIGHT: FULL · plan · machine availability */}
-      <div style={{ flex: '0.95 1 0', maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-        {nonOp ? (
-          <div style={{ ...panel, border: `1px solid ${headColor}`, background: `${headColor}1A`, flexShrink: 0 }}>
-            <div style={{ color: D.ink, fontWeight: 800, fontSize: '1rem' }}>{headLabel}</div>
-            {manual?.reason && <div style={{ color: D.sub2, fontSize: '0.82rem', marginTop: 2 }}>{dt('reason')}: {manual.reason}</div>}
-            <div style={{ color: D.sub, fontSize: '0.78rem', marginTop: 6 }}>{dt('out_of_cycle_exc')}</div>
-          </div>
-        ) : view?.has_plan ? (
-          <>
-            <button onClick={full} disabled={acting || !loadingTruck}
-                    style={{ ...bigBtn(D.accent, acting || !loadingTruck), minHeight: 128, flexShrink: 0 }}>
-              {acting ? dt('recording') : dt('full')}
-              <div style={{ fontSize: '0.74rem', fontWeight: 700, marginTop: 3, opacity: 0.82 }}>
-                {loadingTruck ? `${dt('complete_load')} · ${loadingTruck.truck_no}` : dt('no_truck_loading')}
-              </div>
-            </button>
-            {msg && <div style={{ fontSize: '0.82rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', flexShrink: 0 }}>{msg}</div>}
-            {view?.excavator && (
-              <div style={{ ...panel, flexShrink: 0 }}>
-                <div style={{ color: D.ink, fontWeight: 800, fontSize: '0.76rem', letterSpacing: '0.04em', marginBottom: 8 }}>{dt('plan_details')}</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <Tile k={dt('plan')} v={view.excavator.plan_id ? `#${view.excavator.plan_id}` : '—'} />
-                  <Tile k={dt('shift')} v={view.excavator.shift || '—'} />
-                  <Tile k={dt('loading_loc')} v={view.excavator.loading_location_name || '—'} />
-                  <Tile k={dt('dump_loc')} v={view.excavator.dump_location_name || '—'} />
-                </div>
-              </div>
-            )}
-          </>
-        ) : null}
-        <div style={{ marginTop: 'auto', flexShrink: 0 }}>
-          <ManualStatusControl unitNo={excavatorNo} unitType="excavator" employeeId={employeeId}
-                               current={manual} onChange={(status, reason) => setManual({ status, reason })} />
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ════════════════════════════════════════════════════════════════════════
 //  TRUCK DRIVER WINDOW
 // ════════════════════════════════════════════════════════════════════════
 function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   { employeeId: string; truckNo: string; driverName?: string;
-    viewMode: 'map' | 'status'; setViewMode: (m: 'map' | 'status') => void }) {
+    viewMode: 'map' | '3d' | 'status'; setViewMode: (m: 'map' | '3d' | 'status') => void }) {
   const dt = useDispatchT()
   const [truck, setTruck] = useState<OpTruck | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
@@ -993,6 +789,11 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 color: viewMode === 'map' ? '#0b0f17' : D.sub,
                 background: viewMode === 'map' ? '#38BDF8' : 'transparent', cursor: 'pointer',
               }}>MAP</button>
+              <button onClick={() => setViewMode('3d')} style={{
+                flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
+                color: viewMode === '3d' ? '#0b0f17' : D.sub,
+                background: viewMode === '3d' ? '#38BDF8' : 'transparent', cursor: 'pointer',
+              }}>3D</button>
               <button onClick={() => setViewMode('status')} style={{
                 flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
                 color: viewMode === 'status' ? '#0b0f17' : D.sub,
@@ -1012,16 +813,19 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
               </div>
             ) : (
               <>
-                {/* Map layer — always mounted, opacity-switched for instant toggling */}
+                {/* Map layer — always mounted, opacity-switched for instant
+                    toggling. MAP = flat 2D, 3D = the same nav map with raster-DEM
+                    terrain + sky (same MapLibre instance, threeD prop). */}
                 <div style={{
-                  position: 'absolute', inset: 0, opacity: viewMode === 'map' ? 1 : 0,
-                  pointerEvents: viewMode === 'map' ? 'auto' : 'none', zIndex: viewMode === 'map' ? 1 : 0,
+                  position: 'absolute', inset: 0, opacity: (viewMode === 'map' || viewMode === '3d') ? 1 : 0,
+                  pointerEvents: (viewMode === 'map' || viewMode === '3d') ? 'auto' : 'none', zIndex: (viewMode === 'map' || viewMode === '3d') ? 1 : 0,
                   transition: 'opacity 0.12s ease',
                 }}>
                   <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                          destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads} height="100%" visible={viewMode === 'map'} />
+                          destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
+                          height="100%" visible={viewMode === 'map' || viewMode === '3d'} threeD={viewMode === '3d'} />
                 </div>
-                {viewMode === 'map' && speedKph != null && (
+                {(viewMode === 'map' || viewMode === '3d') && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '1.8rem', fontWeight: 900, color: speedKph > 0 ? '#86EFAC' : D.ink, lineHeight: 1 }}>{speedKph}</span>
@@ -1051,8 +855,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
         </div>
 
         {/* RIGHT — data column, ~50% (action · status · assignment; no scroll).
-            Hidden in STATUS mode so the wheel uses the full window width. */}
-        <div style={{ flex: '1 1 0', minWidth: 0, display: viewMode === 'status' && !nonOp ? 'none' : 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
+            Always visible: STATUS only swaps the LEFT map box for the wheel. */}
+        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {!nonOp && (
             <div style={{ ...panel, flexShrink: 0, padding: 12, border: `1px solid ${D.accent}3A`,
                           background: '#101820', boxShadow: `0 0 0 1px ${D.accent}14` }}>
@@ -1240,16 +1044,6 @@ function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, 
   )
 }
 
-// ── tiny presentational helpers ───────────────────────────────────────────
-function Tile({ k, v }: { k: string; v: string }) {
-  return (
-    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 10, padding: '8px 10px' }}>
-      <div style={{ color: D.sub, fontSize: '0.64rem', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{k}</div>
-      <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.92rem', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
-    </div>
-  )
-}
-
 // ── styles ────────────────────────────────────────────────────────────────
 const cardStyle: React.CSSProperties = {
   background: C.card, borderRadius: 16, padding: 16, marginBottom: 12,
@@ -1302,9 +1096,6 @@ const ghostBtn: React.CSSProperties = {
 }
 function badge(color: string): React.CSSProperties {
   return { fontSize: '0.7rem', fontWeight: 800, color: '#fff', background: color, padding: '4px 9px', borderRadius: 999, whiteSpace: 'nowrap' }
-}
-function solidBadge(color: string): React.CSSProperties {
-  return { fontSize: '0.72rem', fontWeight: 800, color: inkOn(color), background: color, padding: '5px 11px', borderRadius: 999, whiteSpace: 'nowrap' }
 }
 function chip(color: string): React.CSSProperties {
   return { fontSize: '0.72rem', fontWeight: 700, color, background: `${color}1F`, border: `1px solid ${color}55`, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }

@@ -24,14 +24,6 @@ const HomeIcon = ({ active }: IconProps) => (
   </svg>
 )
 
-const ScanIcon = ({ active }: IconProps) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <rect x="3.5" y="6.5" width="17" height="13" rx="2.5" stroke={iconColor(active)} strokeWidth="2" />
-    <circle cx="12" cy="13" r="3.5" stroke={iconColor(active)} strokeWidth="2" />
-    <path d="M8 6.5L9.5 4.5H14.5L16 6.5" stroke={iconColor(active)} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
-
 const HistoryIcon = ({ active }: IconProps) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <rect x="5" y="3.5" width="14" height="17" rx="2.5" stroke={iconColor(active)} strokeWidth="2" />
@@ -70,7 +62,6 @@ export default function BottomNavigation() {
   // Employee lookup lives on the dashboard (Home) now — no separate tab.
   const navItems: NavItem[] = [
     { path: '/home', activePaths: ['/home', '/'], label: t('home'), icon: HomeIcon },
-    { path: '/scan', activePaths: ['/scan'], label: t('scan'), icon: ScanIcon },
     { path: '/dispatch', activePaths: ['/dispatch'], label: 'Dispatch', icon: DispatchIcon },
     { path: '/history', activePaths: ['/history'], label: t('history'), icon: HistoryIcon },
     { path: '/settings', activePaths: ['/settings'], label: t('settings'), icon: SettingsIcon }
@@ -94,7 +85,7 @@ export default function BottomNavigation() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
           alignItems: 'stretch',
           gap: '6px',
           maxWidth: '720px',

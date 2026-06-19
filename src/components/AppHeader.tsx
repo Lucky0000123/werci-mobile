@@ -119,11 +119,13 @@ export default function AppHeader({ currentUser, onLogout }: AppHeaderProps) {
           }}>
             <div style={{ lineHeight: 1.1 }}>
               <div style={{ fontSize: '0.78rem', fontWeight: 700 }}>
-                {currentUser.fullName || currentUser.username}
+                {currentUser.role === 'dispatch' ? 'FMS Dispatch' : (currentUser.fullName || currentUser.username)}
               </div>
-              <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {currentUser.role}
-              </div>
+              {currentUser.role !== 'dispatch' && (
+                <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {currentUser.role}
+                </div>
+              )}
             </div>
             <button
               onClick={onLogout}
@@ -160,7 +162,7 @@ export default function AppHeader({ currentUser, onLogout }: AppHeaderProps) {
                 gap: '4px'
               }}
             >
-              {language === 'id' ? '🇮🇩' : language === 'zh' ? '🇨🇳' : language === 'es' ? '🇪🇸' : '🇬🇧'}
+              {language === 'id' ? '🇮🇩' : language === 'zh' ? '🇨🇳' : '🇬🇧'}
               <span>{language.toUpperCase()}</span>
               <span style={{ fontSize: '0.6rem' }}>▼</span>
             </button>
@@ -194,7 +196,6 @@ export default function AppHeader({ currentUser, onLogout }: AppHeaderProps) {
                   {[
                     { lang: 'id' as const, flag: '🇮🇩', label: 'Bahasa Indonesia' },
                     { lang: 'en' as const, flag: '🇬🇧', label: 'English' },
-                    { lang: 'es' as const, flag: '🇪🇸', label: 'Espanol' },
                     { lang: 'zh' as const, flag: '🇨🇳', label: '中文 (Chinese)' }
                   ].map(({ lang, flag, label }) => (
                     <button

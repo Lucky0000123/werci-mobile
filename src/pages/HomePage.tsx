@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-// import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { offlineDataSync, type OfflineSyncStatus, type SyncStatus } from '../services/offlineDataSync'
 import { useI18n } from '../services/i18n-context'
 import { authService } from '../services/auth'
@@ -69,7 +69,7 @@ const statCardVariants = {
 
 export default function HomePage() {
   const { t } = useI18n()
-  // const navigate = useNavigate()
+  const navigate = useNavigate()
   const [syncStatus, setSyncStatus] = useState<OfflineSyncStatus | null>(null)
   const [summary, setSummary] = useState<PersonalKpiSummary | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -222,22 +222,51 @@ export default function HomePage() {
       }}
     >
       {/* Hero */}
-      <motion.div variants={itemVariants} className="prism-hero" style={{ marginBottom: '14px' }}>
-        <motion.div
-          className="prism-hero__eyebrow"
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1 }}
+      <motion.div
+        variants={itemVariants}
+        className="prism-hero"
+        style={{ marginBottom: '14px', display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '12px' }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <motion.div
+            className="prism-hero__eyebrow"
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            PRISM
+          </motion.div>
+          <h2 className="prism-hero__title">{t('dashboardTitle')}</h2>
+          <p className="prism-hero__subtitle">
+            {syncStatus?.lastSync
+              ? `${t('lastSynced')}: ${new Date(syncStatus.lastSync).toLocaleString()}`
+              : ''
+            }
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/scan')}
+          aria-label="Scan QR code"
+          title="Scan QR"
+          style={{
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '7px',
+            padding: '0 16px',
+            background: 'linear-gradient(135deg, #FC4100, #C9340A)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '12px',
+            fontSize: '0.86rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 6px 16px rgba(252,65,0,0.28)'
+          }}
         >
-          PRISM
-        </motion.div>
-        <h2 className="prism-hero__title">{t('dashboardTitle')}</h2>
-        <p className="prism-hero__subtitle">
-          {syncStatus?.lastSync
-            ? `${t('lastSynced')}: ${new Date(syncStatus.lastSync).toLocaleString()}`
-            : ''
-          }
-        </p>
+          📷 Scan
+        </button>
       </motion.div>
 
       {/* Error */}

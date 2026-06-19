@@ -1800,15 +1800,14 @@ export function setLanguage(lang: Language): void {
   window.dispatchEvent(new CustomEvent('languageChanged', { detail: lang }))
 }
 
-// Toggle between languages (cycles through: id -> en -> es -> zh -> id)
+// Toggle between languages (cycles through: id -> en -> zh -> id). Spanish is
+// retained in the type for back-compat but removed from the user-facing cycle.
 export function toggleLanguage(): Language {
   const current = getCurrentLanguage()
   let newLang: Language
   if (current === 'id') {
     newLang = 'en'
   } else if (current === 'en') {
-    newLang = 'es'
-  } else if (current === 'es') {
     newLang = 'zh'
   } else {
     newLang = 'id'

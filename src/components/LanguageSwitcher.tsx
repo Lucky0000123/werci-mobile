@@ -35,18 +35,18 @@ export default function LanguageSwitcher() {
         EN
       </button>
       <button
-        className={`lang-btn ${currentLang === 'es' ? 'active' : ''}`}
-        onClick={() => handleLanguageSelection('es')}
-        aria-label="Cambiar a Espanol"
-      >
-        ES
-      </button>
-      <button
         className={`lang-btn ${currentLang === 'id' ? 'active' : ''}`}
         onClick={() => handleLanguageSelection('id')}
         aria-label="Switch to Bahasa Indonesia"
       >
         ID
+      </button>
+      <button
+        className={`lang-btn ${currentLang === 'zh' ? 'active' : ''}`}
+        onClick={() => handleLanguageSelection('zh')}
+        aria-label="切换到中文"
+      >
+        中文
       </button>
     </div>
   )

@@ -6,13 +6,16 @@
 // destination geofence + marker, and the heading-aware vehicle marker, over a
 // satellite raster basemap. Falls back to the Leaflet DispatchMap if WebGL is
 // unavailable.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, memo } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import DispatchMap from './DispatchMap'
 import type { DispatchMapProps } from './DispatchMap'
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+// Free global DEM (AWS terrain tiles, terrarium encoding) for the 3D-twin mode —
+// drapes the satellite basemap + haul roads over real elevation. Public, no key.
+const TERRAIN_DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
 type FC = GeoJSON.FeatureCollection
 const EMPTY: FC = { type: 'FeatureCollection', features: [] }
@@ -41,7 +44,7 @@ function destEl(color: string): HTMLDivElement {
   return el
 }
 
-export default function NavMap(props: DispatchMapProps) {
+function NavMap(props: DispatchMapProps) {
   const { height = 260 } = props
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -74,6 +77,18 @@ export default function NavMap(props: DispatchMapProps) {
     mapRef.current = map
     map.on('error', () => { /* swallow tile/style errors — keep the map alive */ })
     map.on('load', () => {
+      // 3D-twin terrain: a raster-DEM source + sky. The terrain itself is only
+      // ENABLED when the threeD prop is on (toggled in the data effect below), so
+      // 2D MAP mode is unaffected. terrarium = AWS elevation-tiles encoding.
+      try {
+        map.addSource('dem', {
+          type: 'raster-dem', tiles: [TERRAIN_DEM], tileSize: 256,
+          encoding: 'terrarium', maxzoom: 15,
+        } as maplibregl.RasterDEMSourceSpecification)
+        // Sky only shows when pitched; harmless in flat mode.
+        map.setSky({ 'sky-color': '#8ec5ff', 'horizon-color': '#cfe6ff',
+          'fog-color': '#dfeeff', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6 } as any)
+      } catch { /* DEM/sky unsupported — degrade to the pitched 2.5D nav view */ }
       map.addSource('lanes', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'lanes-line', type: 'line', source: 'lanes',
         paint: { 'line-color': ['match', ['get', 'loaded_side'], 'left', '#38BDF8', 'right', '#38BDF8', '#94A3B8'], 'line-width': 2, 'line-opacity': 0.5 } })
@@ -89,6 +104,16 @@ export default function NavMap(props: DispatchMapProps) {
     return () => { try { map.remove() } catch { /* */ }; mapRef.current = null; setReady(false) }
   }, [glFailed])
 
+  // Notify parent when visibility changes so the map can resize if it was hidden.
+  const wasVisible = useRef(true)
+  useEffect(() => {
+    const visible = (props.visible !== false)
+    if (visible && !wasVisible.current && mapRef.current) {
+      try { mapRef.current.resize() } catch { /* */ }
+    }
+    wasVisible.current = visible
+  }, [props.visible])
+
   // keep the canvas sized to its (flex) container
   useEffect(() => {
     if (!ready || !mapRef.current || !elRef.current) return
@@ -101,7 +126,15 @@ export default function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8' } = propsRef.current
+    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', threeD = false } = propsRef.current
+
+    // 3D-twin terrain: enable/disable the DEM-driven relief. Enabling drapes the
+    // satellite + haul roads over real elevation; disabling returns to flat 2D.
+    try {
+      if (map.getSource('dem')) {
+        map.setTerrain(threeD ? ({ source: 'dem', exaggeration: 1.4 } as any) : null)
+      }
+    } catch { /* terrain unsupported on this GPU — ignore, stays flat */ }
 
     // Route source: prefer the curated loaded/empty LANE segments (each tagged
     // `lane` → coloured by the line layer); else the plain fallback line.
@@ -137,26 +170,30 @@ export default function NavMap(props: DispatchMapProps) {
       else { destMkRef.current.setLngLat([dest.lng, dest.lat]); (destMkRef.current.getElement() as HTMLElement).style.background = dc }
     } else if (destMkRef.current) { destMkRef.current.remove(); destMkRef.current = null }
 
-    // camera: NAV mode follows the truck (pitched + heading-up); otherwise fit once.
+    // camera: NAV mode follows the truck (pitched + heading-up); otherwise fit
+    // once. In 3D-twin mode we always keep a pitch so the terrain reads as 3D
+    // (force a re-fit when the mode flips, since the fitted-key would skip it).
     const navMode = !!(((routeSegments && routeSegments.length) || (route && route.length >= 2)) && truck)
+    const overviewPitch = threeD ? 55 : 0
+    const modeTag = threeD ? '3d' : '2d'
     if (navMode && truck) {
       map.easeTo({ center: [truck.lng, truck.lat], bearing: truck.course ?? map.getBearing(),
-        pitch: 60, zoom: Math.max(map.getZoom(), 16.5), duration: 800, essential: true })
+        pitch: threeD ? 68 : 60, zoom: Math.max(map.getZoom(), 16.5), duration: 800, essential: true })
     } else {
-      const key = dest ? `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}` : (truck ? 't' : '')
+      const key = (dest ? `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}` : (truck ? 't' : '')) + ':' + modeTag
       if (key && key !== fittedRef.current) {
         fittedRef.current = key
         if (truck && dest) {
           const b = new maplibregl.LngLatBounds([truck.lng, truck.lat], [truck.lng, truck.lat])
           b.extend([dest.lng, dest.lat])
-          map.fitBounds(b, { padding: 60, pitch: 0, bearing: 0, maxZoom: 16, duration: 600 })
+          map.fitBounds(b, { padding: 60, pitch: overviewPitch, bearing: 0, maxZoom: 16, duration: 600 })
         } else if (truck) {
-          map.easeTo({ center: [truck.lng, truck.lat], zoom: 15, pitch: 0, bearing: 0, duration: 600 })
+          map.easeTo({ center: [truck.lng, truck.lat], zoom: 15, pitch: overviewPitch, bearing: 0, duration: 600 })
         }
       }
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
-      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads])
+      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.threeD])
 
   if (glFailed) return <DispatchMap {...props} />
 
@@ -164,3 +201,7 @@ export default function NavMap(props: DispatchMapProps) {
     <div ref={elRef} style={{ height, width: '100%', borderRadius: 12, overflow: 'hidden', background: '#0b0f17', border: '1px solid #2a2a2a' }} />
   )
 }
+
+const MemoNavMap = memo(NavMap)
+export { MemoNavMap as NavMap }
+export default MemoNavMap

@@ -5,7 +5,7 @@
 // truck at street zoom (the road in front), like Google Maps driving view.
 // No assignment → it just shows the current position. Satellite basemap (Esri
 // World Imagery, public). Vanilla Leaflet, divIcons only (no marker images).
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, memo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -20,13 +20,17 @@ export interface DispatchMapProps {
   routeSegments?: { lane: string; coordinates: [number, number][] }[] | null  // [lng,lat] loaded/empty
   roads?: GeoJSON.FeatureCollection | null    // optional empty/full lane overlay
   height?: number | string
+  visible?: boolean
+  // 3D twin mode (NavMap only): adds raster-DEM terrain + sky so the haul roads
+  // drape over real elevation. Ignored by the Leaflet fallback (2D only).
+  threeD?: boolean
 }
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const NAV_ZOOM = 16
 
-export default function DispatchMap({
-  truck, dest, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, height = 260,
+function DispatchMap({
+  truck, dest, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, height = 260, visible,
 }: DispatchMapProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -46,6 +50,16 @@ export default function DispatchMap({
     const t = setTimeout(() => map.invalidateSize(), 250)
     return () => { clearTimeout(t); map.remove(); mapRef.current = null; layers.current = {} }
   }, [])
+
+  // If the map was hidden (opacity 0) and is shown again, force a resize.
+  const wasVisible = useRef(true)
+  useEffect(() => {
+    const now = visible !== false
+    if (now && !wasVisible.current && mapRef.current) {
+      try { mapRef.current.invalidateSize() } catch { /* */ }
+    }
+    wasVisible.current = now
+  }, [visible])
 
   // roads overlay
   useEffect(() => {
@@ -138,3 +152,7 @@ export default function DispatchMap({
     />
   )
 }
+
+const MemoDispatchMap = memo(DispatchMap)
+export { MemoDispatchMap as DispatchMap }
+export default MemoDispatchMap

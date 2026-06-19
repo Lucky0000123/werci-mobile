@@ -22,6 +22,8 @@ import { offlineDataSync } from './services/offlineDataSync'
 // import { apiFetch } from './services/api'
 import { initBackgroundSync } from './services/backgroundSync'
 import { authService, type AuthenticatedUser } from './services/auth'
+import { cabConfigured, CAB_USERNAME, CAB_PASSWORD } from './services/cabMode'
+import ModePicker from './pages/ModePicker'
 import {
   checkBiometricAvailability,
   promptBiometricDetailed,
@@ -141,6 +143,11 @@ function AppContent() {
   const [showIntro, setShowIntro] = useState(true)
   const [authReady, setAuthReady] = useState(false)
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null)
+  // Entry mode picker (shown when there's no session): null = show the picker,
+  // 'user' = normal login flow, 'fms' = silent in-cab service-account sign-in.
+  const [entryChoice, setEntryChoice] = useState<'user' | 'fms' | null>(null)
+  // FMS sign-in failed (bad creds / offline) → show the picker with an error.
+  const [cabAuthFailed, setCabAuthFailed] = useState(false)
   const [biometricGate, setBiometricGate] = useState<'idle' | 'prompting' | 'unlocked' | 'failed' | 'locked'>('idle')
   const [showBiometricPrompt, setShowBiometricPrompt] = useState(false)
   const [biometricPromptAvail, setBiometricPromptAvail] = useState(false)
@@ -181,20 +188,16 @@ function AppContent() {
     const bootstrapAuth = async () => {
       try {
         await authService.bootstrap()
-        const user = await authService.getCurrentUser()
+        let user = await authService.getCurrentUser()
 
-        if (!active) return
-
-        // If we have a user, silently validate the token when online.
-        // Offline users stay logged in regardless.
+        // Validate an existing session UP FRONT. If the server rejects it (e.g.
+        // after a FLASK_SECRET_KEY rotation invalidates old tokens), DROP it to
+        // null so cab mode can silently re-authenticate below instead of getting
+        // stuck. Offline sessions are kept (can't validate without a network).
         if (user && navigator.onLine) {
           try {
             const isValid = await authService.validateToken()
-            if (!isValid && active) {
-              setCurrentUser(null)
-              setAuthReady(true)
-              return
-            }
+            if (!isValid) user = null
           } catch (validateError) {
             console.warn('Token validation error during bootstrap, keeping session:', validateError)
             // Keep session on unexpected errors (network blips, etc.)
@@ -203,9 +206,17 @@ function AppContent() {
 
         if (!active) return
 
+        // No (valid) session → reveal the entry mode picker (User / FMS).
+        if (!user) {
+          setCurrentUser(null)
+          setAuthReady(true)
+          return
+        }
+
         // Biometric gate: if user has a session AND opted into biometric lock,
-        // prompt native biometric before revealing the app.
-        if (user && isBiometricEnabled()) {
+        // prompt native biometric before revealing the app. Skipped for the FMS
+        // service account (an unattended kiosk must not block on a fingerprint).
+        if (user && isBiometricEnabled() && user.role !== 'dispatch') {
           const avail = await checkBiometricAvailability()
           if (avail.isAvailable && active) {
             setBiometricGate('prompting')
@@ -426,12 +437,33 @@ function AppContent() {
     }
   }
 
+  // FMS button on the mode picker: silently sign in as the in-cab service
+  // account, then route to the Dispatch board (the role gate restricts the UI).
+  const signInFms = async () => {
+    setEntryChoice('fms')
+    setCabAuthFailed(false)
+    try {
+      const user = await authService.login(CAB_USERNAME, CAB_PASSWORD)
+      setCurrentUser(user)
+      navigate('/dispatch', { replace: true })
+      // Warm the on-device cache so the cab can identify employees offline.
+      addToast('info', 'Syncing dispatch data for offline use…')
+      offlineDataSync.syncOfflineData()
+        .then(() => addToast('success', 'Data cached — ready offline'))
+        .catch(() => { /* will retry on the auto-sync schedule */ })
+    } catch (error) {
+      console.warn('[fms] silent sign-in failed:', error)
+      setCabAuthFailed(true)   // → picker shows an error
+    }
+  }
+
   const handleLogout = async () => {
     try {
       await authService.clearAuth()
       clearBiometricPreference()
       setCurrentUser(null)
       setBiometricGate('idle')
+      setEntryChoice(null)      // back to the User / FMS picker
       navigate('/', { replace: true })
       addToast('info', 'You have been logged out.')
     } catch (error) {
@@ -441,12 +473,33 @@ function AppContent() {
   }
 
   if (!currentUser) {
+    // 'user' → normal username/password login.
+    if (entryChoice === 'user') {
+      return (
+        <Suspense fallback={<LoadingScreen />}>
+          <LoginPage onLoginSuccess={handleLoginSuccess} onBack={() => setEntryChoice(null)} />
+        </Suspense>
+      )
+    }
+    // 'fms' → silent service-account sign-in is in flight (show spinner). On
+    // failure cabAuthFailed flips and we fall through to the picker with an error.
+    if (entryChoice === 'fms' && !cabAuthFailed) {
+      return <LoadingScreen />
+    }
+    // default → the entry mode picker (User / FMS).
     return (
-      <Suspense fallback={<LoadingScreen />}>
-        <LoginPage onLoginSuccess={handleLoginSuccess} />
-      </Suspense>
+      <ModePicker
+        onPickUser={() => setEntryChoice('user')}
+        onPickFms={signInFms}
+        fmsAvailable={cabConfigured}
+        fmsError={cabAuthFailed}
+      />
     )
   }
+
+  // FMS device session (the in-cab service account): the UI is locked to the
+  // Dispatch board only — no Home / History / Settings / scan.
+  const fmsMode = currentUser.role === 'dispatch'
 
   // Process QR code
   const processQRCode = async (qrContent: string) => {
@@ -616,8 +669,11 @@ function AppContent() {
     }
   }
 
-  const showBottomNav = !['/scan'].includes(location.pathname)
-  const showHeader = !['/scan'].includes(location.pathname)
+  // FMS device: hide the bottom nav entirely (Dispatch only). The header stays
+  // so the operator can Logout → return to the mode picker (e.g. to sign in as
+  // an admin).
+  const showBottomNav = !['/scan'].includes(location.pathname) && !fmsMode
+  const showHeader = !['/scan', '/dispatch'].includes(location.pathname)
 
   return (
     <div className="app-container">
@@ -625,7 +681,7 @@ function AppContent() {
       {showHeader && <AppHeader currentUser={currentUser} onLogout={handleLogout} />}
 
       {/* Main Content */}
-      <main className={`app-main ${showBottomNav ? 'with-bottom-nav' : ''}`}>
+      <main className={`app-main ${showBottomNav ? 'with-bottom-nav' : ''} ${!showHeader ? 'no-header' : ''}`}>
         <ErrorBoundary onReset={() => navigate('/home')}>
           <AnimatePresence mode="wait">
           <Suspense
@@ -666,6 +722,13 @@ function AppContent() {
               </motion.div>
             }
           >
+            {fmsMode ? (
+            // FMS device — Dispatch board ONLY. Any other route bounces to it.
+            <Routes location={location} key={location.pathname}>
+              <Route path="/dispatch" element={<DispatchPage />} />
+              <Route path="*" element={<Navigate to="/dispatch" replace />} />
+            </Routes>
+            ) : (
             <Routes location={location} key={location.pathname}>
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="/home" element={<HomePage />} />
@@ -698,6 +761,7 @@ function AppContent() {
             <Route path="/dispatch" element={<DispatchPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
+            )}
           </Suspense>
           </AnimatePresence>
         </ErrorBoundary>

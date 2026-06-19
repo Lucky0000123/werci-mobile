@@ -63,6 +63,8 @@
 html {
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
+  /* Stop the WebView rubber-band / bounce so the in-cab screens don't drift. */
+  overscroll-behavior: none;
 }
 
 body {
@@ -76,6 +78,24 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+/* In-cab OUI lock: when a full-screen operator window is open, pin the whole
+   viewport so neither the truck nor the excavator screen can be dragged /
+   bounced / scrolled. DispatchPage toggles body.oui-locked while connected. */
+body.oui-locked {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+body.oui-locked #root {
+  height: 100%;
+  overflow: hidden;
 }
 
 /* Remove default button styles */
