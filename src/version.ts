@@ -7,6 +7,28 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.22.0 — Status view fit + bigger Waiting Event: the dump-truck Status view
+ *          now renders the haul-cycle wheel as a TRUE square that fits INSIDE
+ *          the same box the Map uses (measured, never stretched). The redundant
+ *          bar over the map/status box is gone — the "Truck not in any active
+ *          plan yet" notice moved into that space (slim, shown in both modes).
+ *          The recovered room makes the OPERATOR ACTION / "Waiting Event" area
+ *          larger: a per-state guidance line + a tall confirm button (e.g.
+ *          "Loading Started"), matching the OUI prototype.
+ * 2.21.1 — Status view polish: the haul-cycle wheel is now a full-width SQUARE
+ *          that fills the window (right data column hidden in STATUS mode), the
+ *          central hub text is smaller, the CURRENT/NEXT/NEXT-LOCATION chips
+ *          collapse to one compact line, and the cab top bar is hidden while the
+ *          wheel is shown — maximising the picture on the in-cab tablet.
+ * 2.21.0 — Visual Haul-Cycle Wheel: The dump-truck Status view now shows the
+ *          "Cycle_Update.png" wheel art with the current haul stage
+ *          highlighted (QUEUE_SPOT → LOADING → ... → EMPTY_WEIGHBRIDGE).
+ *          Includes a calibrated wedge overlay and a central info-hub for
+ *          CURRENT/NEXT status. Falls back to a text-card if art fails.
+ * 2.20.0 — Dispatch nav polish: the haul route now matches the web map — a
+ *          dark shiny ORANGE loaded lane + GREEN empty lane over a dark casing
+ *          (connector stays yellow). Rolls up the latest truck-OUI / NavMap
+ *          refinements on top of 2.19.0.
  * 2.19.0 — Truck OUI fit pass: PRISM logo added to the top bar (left); the
  *          OPERATOR ACTION block compacted (smaller action/awaiting line, the
  *          Request Status Change + Report GPS Unavailable buttons sit right
@@ -134,4 +156,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.19.0'
+export const APP_VERSION = '2.22.0'

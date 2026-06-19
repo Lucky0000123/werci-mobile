@@ -12,7 +12,7 @@
 // status names / colours / labels come from the server board legend, which
 // mirrors the prototype exactly. Manual statuses (delay / standby / breakdown /
 // maintenance) post to /api/dispatch/equipment-status and never break the cycle.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { JSX } from 'react'
 import { apiFetch } from '../services/api'
 import connectionManager from '../services/connectionManager'
@@ -20,6 +20,8 @@ import type { ConnectionStatus } from '../services/connectionManager'
 import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
 import NavMap from '../components/NavMap'
+import { TruckStatusPanel } from '../components/TruckStatusPanel'
+import type { Assignment, StatusState } from '../components/TruckStatusPanel'
 import prismLogo from '../assets/Logo1_splash.png'
 
 // ── types ────────────────────────────────────────────────────────────────
@@ -95,9 +97,8 @@ const STATE_STYLE: Record<string, StateStyle> = {
   emptyWB:      { color: '#67E8F9', label: 'Empty Weighbridge' },
   emptyTravel2: { color: '#CBD5E1', label: 'Empty Travel 2' },
 }
-// Operator-facing cycle order (the 12-state ring shown as a linear stepper).
-const CYCLE_ORDER = ['waiting', 'spot', 'loading', 'fullTravel1', 'fullWB', 'fullTravel2',
-  'sampling', 'fullTravel3', 'dumping', 'emptyTravel1', 'emptyWB', 'emptyTravel2']
+// Cycle progress is shown by the Status-view haul-cycle wheel (TruckStatusPanel),
+// which maps the 12 operator states onto the 8 wheel segments + colour legend.
 const EXC_STATE_STYLE: Record<string, StateStyle> = {
   loading: { color: '#FF4FB8', label: 'Loading' },
   waiting: { color: '#FFE600', label: 'Ready / Operating' },
@@ -184,6 +185,7 @@ export default function DispatchPage() {
   const [result, setResult] = useState<ConnectResult | null>(null)
   const [connectedUnit, setConnectedUnit] = useState('')
   const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
+  const [viewMode, setViewMode] = useState<'map' | 'status'>('map')
   // Employee-ID keyboard: numeric by default (IDs are mostly digits), with an
   // in-app 123/ABC toggle since the OS numeric pad has no letter switch.
   const [idMode, setIdMode] = useState<'numeric' | 'text'>('numeric')
@@ -341,42 +343,45 @@ export default function DispatchPage() {
   if (profile && connection) {
     const isExc = connection.unit_type === 'excavator'
     return (
-      <div style={{ height: 'calc(100dvh - 96px)', boxSizing: 'border-box', background: D.bg,
+      <div style={{ height: '100dvh', boxSizing: 'border-box', background: D.bg,
                     padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
         {/* compact top bar — logo, name, warnings, switch/end */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          <img src={prismLogo} alt="PRISM" style={{ height: 28, width: 'auto', flexShrink: 0 }} />
-          <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8, overflow: 'hidden' }}>
-            <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {profile.name || profile.employee_id}
-            </span>
-            <span style={{ color: D.sub, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>ID {profile.employee_id}</span>
-          </div>
-          {connection.warnings.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, overflow: 'hidden' }}>
-              {connection.warnings.slice(0, 2).map((w) => (
-                <span key={w} style={chip(w.startsWith('kimper_expired') || w === 'unit_already_paired' ? C.red : C.amber)}>{WARN_LABELS[w] || w}</span>
-              ))}
+        {viewMode !== 'status' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <img src={prismLogo} alt="PRISM" style={{ height: 28, width: 'auto', flexShrink: 0 }} />
+            <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8, overflow: 'hidden' }}>
+              <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {profile.name || profile.employee_id}
+              </span>
+              <span style={{ color: D.sub, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>ID {profile.employee_id}</span>
             </div>
-          )}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button onClick={reset}
-                    style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: D.sub2, background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
-              {dt('different_emp')}
-            </button>
-            <button onClick={() => disconnect(profile.employee_id)} disabled={loading}
-                    style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: '#fff', background: '#7F1D1D', border: '1px solid #B91C1C', borderRadius: 9, cursor: 'pointer' }}>
-              {dt('end_shift')}
-            </button>
+            {connection.warnings.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, overflow: 'hidden' }}>
+                {connection.warnings.slice(0, 2).map((w) => (
+                  <span key={w} style={chip(w.startsWith('kimper_expired') || w === 'unit_already_paired' ? C.red : C.amber)}>{WARN_LABELS[w] || w}</span>
+                ))}
+              </div>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexShrink: 0 }}>
+              <button onClick={reset}
+                      style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: D.sub2, background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
+                {dt('different_emp')}
+              </button>
+              <button onClick={() => disconnect(profile.employee_id)} disabled={loading}
+                      style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: '#fff', background: '#7F1D1D', border: '1px solid #B91C1C', borderRadius: 9, cursor: 'pointer' }}>
+                {dt('end_shift')}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* OUI fills the rest — single screen, no page scroll */}
         <div style={{ flex: 1, minHeight: 0 }}>
           {isExc ? (
             <ExcavatorOperatorWindow employeeId={profile.employee_id} excavatorNo={connection.unit_no} operatorName={profile.name} />
           ) : (
-            <TruckDriverWindow employeeId={profile.employee_id} truckNo={connection.unit_no} driverName={profile.name} />
+            <TruckDriverWindow employeeId={profile.employee_id} truckNo={connection.unit_no} driverName={profile.name}
+                               viewMode={viewMode} setViewMode={setViewMode} />
           )}
         </div>
       </div>
@@ -524,12 +529,12 @@ export default function DispatchPage() {
 // ── shared board/operator-view shapes ─────────────────────────────────────
 type OpTruck = {
   truck_no: string; driver_name?: string | null; zone: string
-  distance_m?: number | null; live?: boolean; plan_status?: string
+  distance_m?: number | null; live?: boolean; connected?: boolean; plan_status?: string
   state?: string; state_label?: string; state_color?: string; time_in_state_s?: number | null
   lat?: number | null; lng?: number | null
 }
 type OpExcavator = {
-  excavator_no?: string; plan_id?: number; shift?: string
+  excavator_no?: string; plan_id?: number; shift?: string; plan_date?: string | null
   loading_location_name?: string | null; dump_location_name?: string | null
   loading_zone_m?: number; waiting_zone_m?: number
   lat?: number | null; lng?: number | null
@@ -734,8 +739,9 @@ function ExcavatorOperatorWindow({ employeeId, excavatorNo, operatorName }:
 // ════════════════════════════════════════════════════════════════════════
 //  TRUCK DRIVER WINDOW
 // ════════════════════════════════════════════════════════════════════════
-function TruckDriverWindow({ employeeId, truckNo }:
-  { employeeId: string; truckNo: string; driverName?: string }) {
+function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
+  { employeeId: string; truckNo: string; driverName?: string;
+    viewMode: 'map' | 'status'; setViewMode: (m: 'map' | 'status') => void }) {
   const dt = useDispatchT()
   const [truck, setTruck] = useState<OpTruck | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
@@ -761,9 +767,10 @@ function TruckDriverWindow({ employeeId, truckNo }:
     let alive = true
     function pick(trucks: OpTruck[]) { return trucks.find((t) => (t.truck_no || '').trim().toUpperCase() === target.current) }
     function applyExc(exc: OpExcavator, mine: OpTruck) {
-      setTruck(mine)
+      setTruck({ ...mine, connected: true })
       setPlanId(exc?.plan_id ?? null); setExcavatorNo(exc?.excavator_no ?? null)
       setLoadingLoc(exc?.loading_location_name ?? null); setDumpLoc(exc?.dump_location_name ?? null)
+      setShiftDate(exc?.shift, exc?.plan_date)
       setGeo({ excLat: exc?.lat, excLng: exc?.lng, dumpLat: exc?.dump_lat, dumpLng: exc?.dump_lng,
                loadingZoneM: exc?.loading_zone_m, dumpZoneM: exc?.dump_zone_m })
     }
@@ -880,6 +887,18 @@ function TruckDriverWindow({ employeeId, truckNo }:
   const speedKph = tel?.speed != null ? Math.max(0, Math.round(tel.speed)) : null
   const nextLocName = isFull ? (dumpLoc || dt('dump_loc')) : (loadingLoc || excavatorNo || dt('shovel'))
 
+  // Prototype "required action" guidance shown above the Waiting-Event button.
+  const reqHint = (() => {
+    if (!st) return dt('req_default')
+    if (st === 'spot' || st === 'waiting') return dt('req_spot')
+    if (st === 'loading') return dt('req_loading')
+    if (st === 'fullWB' || st === 'emptyWB') return dt('req_wb')
+    if (st === 'sampling') return dt('req_sampling')
+    if (st === 'dumping') return dt('req_dumping')
+    if (st.startsWith('fullTravel') || st.startsWith('emptyTravel')) return dt('req_travel').replace('{loc}', nextLocName)
+    return dt('req_default')
+  })()
+
   // "Road ahead" route along the haul network, truck → destination. Refetched on
   // each leg change (new destination) + every 15 s as the truck advances. Refs
   // keep the latest truck/dest without re-running the effect on every GPS tick.
@@ -907,15 +926,81 @@ function TruckDriverWindow({ employeeId, truckNo }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dest?.lat, dest?.lng])
 
-  const shiftDate = '—'   // shift/date not in operator-view yet — wire from the dispatch plan
+  const [shiftDate, setShiftDateRaw] = useState<string>('—')
+  const setShiftDate = useCallback((shift?: string | null, planDate?: string | null) => {
+    const parts: string[] = []
+    if (shift) parts.push(shift)
+    if (planDate) {
+      try {
+        const d = new Date(planDate)
+        if (!isNaN(d.getTime())) parts.push(d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }))
+      } catch { /* ignore */ }
+    }
+    setShiftDateRaw(parts.length ? parts.join(' · ') : '—')
+  }, [])
+  const assignment: Assignment = useMemo(() => ({
+    truck_no: truck?.truck_no || truckNo,
+    driver_name: truck?.driver_name,
+    excavator_no: excavatorNo,
+    loading_location_name: loadingLoc,
+    dump_location_name: dumpLoc,
+    plan_id: planId,
+    shift: undefined, // rendered via shiftDate
+    plan_date: undefined,
+    next_location_name: nextLocName,
+    connected: truck?.connected,
+    live: truck?.live,
+    time_in_state_s: truck?.time_in_state_s,
+  }), [truck?.truck_no, truck?.driver_name, truck?.connected, truck?.live, truck?.time_in_state_s, truckNo, excavatorNo, loadingLoc, dumpLoc, planId, nextLocName])
+
+  const statusState: StatusState = useMemo(() => ({
+    state: st,
+    state_label: curLabel,
+    state_color: curColor,
+    next_state: act?.next,
+    next_label: nextLabel,
+    next_color: nextColor,
+    manual_status: manual && manual.status !== 'operating' ? {
+      status: manual.status,
+      reason: manual.reason,
+      label: manualMeta(manual.status)?.label,
+      color: manualMeta(manual.status)?.color,
+    } : null,
+  }), [st, curLabel, curColor, act?.next, nextLabel, nextColor, manual])
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
       {/* MIDDLE: map (~50%) | data (~50%). The operator name lives in the parent
           top bar — no header here (avoids the duplicate name + saves space). */}
       <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0 }}>
-        {/* LEFT — map column, ~50% */}
+        {/* LEFT — map/status column, ~50% */}
         <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-          {!nonOp && <CycleStepper current={st} />}
+          {/* "Not in a plan" notice sits where the old cycle bar was — slim, and
+              visible in BOTH map & status modes (the wheel already shows cycle). */}
+          {err && !truck && (
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                          background: `${C.amber}14`, border: `1px solid ${C.amber}55`, borderRadius: 10 }}>
+              <span style={{ fontSize: '0.95rem' }}>⏳</span>
+              <span style={{ color: C.amber, fontWeight: 700, fontSize: '0.82rem' }}>{err}</span>
+            </div>
+          )}
+
+          {/* Map / Status switch */}
+          {!nonOp && (
+            <div style={{ flexShrink: 0, display: 'flex', background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 10, padding: 4, gap: 4 }}>
+              <button onClick={() => setViewMode('map')} style={{
+                flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
+                color: viewMode === 'map' ? '#0b0f17' : D.sub,
+                background: viewMode === 'map' ? '#38BDF8' : 'transparent', cursor: 'pointer',
+              }}>MAP</button>
+              <button onClick={() => setViewMode('status')} style={{
+                flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
+                color: viewMode === 'status' ? '#0b0f17' : D.sub,
+                background: viewMode === 'status' ? '#38BDF8' : 'transparent', cursor: 'pointer',
+              }}>STATUS</button>
+            </div>
+          )}
+
           <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             {nonOp ? (
               <div style={{ ...panel, height: '100%', boxSizing: 'border-box', border: `1px solid ${manualMeta(manual!.status)?.color}`,
@@ -927,54 +1012,82 @@ function TruckDriverWindow({ employeeId, truckNo }:
               </div>
             ) : (
               <>
-                <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                        destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads} height="100%" />
-                {speedKph != null && (
+                {/* Map layer — always mounted, opacity-switched for instant toggling */}
+                <div style={{
+                  position: 'absolute', inset: 0, opacity: viewMode === 'map' ? 1 : 0,
+                  pointerEvents: viewMode === 'map' ? 'auto' : 'none', zIndex: viewMode === 'map' ? 1 : 0,
+                  transition: 'opacity 0.12s ease',
+                }}>
+                  <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
+                          destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads} height="100%" visible={viewMode === 'map'} />
+                </div>
+                {viewMode === 'map' && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '1.8rem', fontWeight: 900, color: speedKph > 0 ? '#86EFAC' : D.ink, lineHeight: 1 }}>{speedKph}</span>
                     <span style={{ color: D.sub, fontSize: '0.62rem', fontWeight: 700 }}>km/h</span>
                   </div>
                 )}
+                {/* Status layer — always mounted, opacity-switched */}
+                <div style={{
+                  position: 'absolute', inset: 0, opacity: viewMode === 'status' ? 1 : 0,
+                  pointerEvents: viewMode === 'status' ? 'auto' : 'none', zIndex: viewMode === 'status' ? 1 : 0,
+                  transition: 'opacity 0.12s ease',
+                }}>
+                  <TruckStatusPanel status={statusState} assignment={assignment} />
+                </div>
               </>
             )}
           </div>
-          {/* state chips — UNDER the map */}
-          <div style={{ flexShrink: 0, display: 'flex', gap: 8 }}>
-            <BottomChip label={dt('current_state')} value={nonOp ? dt('ms_' + manual!.status) : curLabel} color={nonOp ? (manualMeta(manual!.status)?.color || D.sub) : curColor} big />
-            <BottomChip label={dt('next_state')} value={nextLabel || '—'} color={nextColor} />
-            <BottomChip label={dt('next_location')} value={nextLocName} color={D.accent} />
-          </div>
+          {/* current / next / next-location — compact line (boxes removed).
+              Hidden in STATUS mode (the wheel's hub already shows it). */}
+          {viewMode !== 'status' && (
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 4, columnGap: 16, padding: '2px 4px' }}>
+              <StateLine label={dt('current_state')} value={nonOp ? dt('ms_' + manual!.status) : curLabel} color={nonOp ? (manualMeta(manual!.status)?.color || D.sub) : curColor} />
+              <StateLine label={dt('next_state')} value={nextLabel || '—'} color={nextColor} />
+              <StateLine label={dt('next_location')} value={nextLocName} color={D.accent} />
+            </div>
+          )}
         </div>
 
-        {/* RIGHT — data column, ~50% (action · status · assignment; no scroll) */}
-        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
-          {err && !truck && <div style={{ ...panel, color: C.amber, flexShrink: 0 }}>{err}</div>}
-
+        {/* RIGHT — data column, ~50% (action · status · assignment; no scroll).
+            Hidden in STATUS mode so the wheel uses the full window width. */}
+        <div style={{ flex: '1 1 0', minWidth: 0, display: viewMode === 'status' && !nonOp ? 'none' : 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {!nonOp && (
-            <div style={{ ...panel, flexShrink: 0, padding: 8 }}>
+            <div style={{ ...panel, flexShrink: 0, padding: 12, border: `1px solid ${D.accent}3A`,
+                          background: '#101820', boxShadow: `0 0 0 1px ${D.accent}14` }}>
+              {/* OPERATOR ACTION header + the per-state guidance (prototype) */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{ color: D.accent, fontSize: '1rem', lineHeight: 1.1 }}>▸</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: D.accent, fontWeight: 800, fontSize: '0.62rem', letterSpacing: '0.1em' }}>{dt('operator_action')}</div>
+                  <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.25, marginTop: 2 }}>{reqHint}</div>
+                </div>
+              </div>
+
               {act ? (
                 <button onClick={() => run(act)} disabled={acting || (act.kind === 'first_bucket' && otherLoading)}
-                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 48, fontSize: '1rem' }}>
+                        style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 92, fontSize: '1.35rem', marginTop: 12 }}>
                   {acting ? dt('recording')
                     : (act.kind === 'first_bucket' && otherLoading) ? dt('another_loading')
                     : actLabel}
                 </button>
               ) : (
-                <div style={{ padding: '6px 10px', borderRadius: 10, background: D.panel2, border: `1px solid ${D.line}` }}>
-                  <span style={{ color: D.accent, fontWeight: 800, fontSize: '0.62rem', letterSpacing: '0.06em' }}>AWAITING EVENT · </span>
-                  <span style={{ color: D.sub2, fontSize: '0.8rem' }}>
+                <div style={{ marginTop: 12, minHeight: 92, borderRadius: 16, background: D.panel2, border: `1px dashed ${D.line2}`,
+                              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '12px 14px' }}>
+                  <div style={{ color: D.sub, fontWeight: 800, fontSize: '0.92rem', letterSpacing: '0.04em' }}>{dt('waiting_event')}</div>
+                  <div style={{ color: D.sub2, fontSize: '0.82rem', marginTop: 4 }}>
                     {st === 'loading' ? dt('loading_in_progress') : st === 'waiting' ? dt('waiting_bucket') : dt('no_action')}
-                  </span>
+                  </div>
                 </div>
               )}
-              {msg && msg !== '✓' && <div style={{ fontSize: '0.78rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 4 }}>{msg}</div>}
-              {/* secondary actions UNDER the action/awaiting */}
-              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              {msg && msg !== '✓' && <div style={{ fontSize: '0.8rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 6 }}>{msg}</div>}
+              {/* secondary actions UNDER the action/waiting-event */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={() => setStatusOpen(true)} style={secBtn}>Request Status Change</button>
                 <button onClick={() => setGpsNote((v) => !v)} style={secBtn}>Report GPS Unavailable</button>
               </div>
-              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.72rem', marginTop: 4 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
+              {gpsNote && <div style={{ color: D.sub2, fontSize: '0.72rem', marginTop: 6 }}>Manual mode — confirm arrival with the action button above if GPS/RFID auto-arrival is unavailable.</div>}
             </div>
           )}
 
@@ -989,13 +1102,11 @@ function TruckDriverWindow({ employeeId, truckNo }:
             <SectionLabel icon="📍" text="ASSIGNMENT" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 5 }}>
               <MiniTile k="Truck ID" v={truck?.truck_no || truckNo} />
+              <MiniTile k="Driver" v={truck?.driver_name || '—'} />
               <MiniTile k="Assigned Excavator" v={excavatorNo || '—'} />
+              <MiniTile k="Connection" v={truck?.connected ? (truck?.live ? 'Connected · Live' : 'Connected · GPS offline') : 'Not connected'} />
               <MiniTile k="Loading Source" v={loadingLoc || '—'} />
               <MiniTile k="Dump Location" v={dumpLoc || '—'} />
-              <MiniTile k="Loaded Weighbridge" v="—" />
-              <MiniTile k="Empty Weighbridge" v="—" />
-              <MiniTile k="Sample House" v="—" />
-              <MiniTile k="Material" v="—" />
               <MiniTile k="Plan ID" v={planId ? `#${planId}` : '—'} />
               <MiniTile k="Shift / Date" v={shiftDate} />
               <div style={{ gridColumn: '1 / -1' }}><MiniTile k="Next Location" v={nextLocName} /></div>
@@ -1009,54 +1120,34 @@ function TruckDriverWindow({ employeeId, truckNo }:
 
 // ── OUI presentational helpers (top-bar pills, cycle stepper, bottom chips) ──
 // Compact assignment tile (denser than Tile) so the grid fits with no scroll.
-function MiniTile({ k, v }: { k: string; v: string }) {
+const MiniTile = memo(function MiniTile({ k, v }: { k: string; v: string }) {
   return (
     <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 7, padding: '3px 7px' }}>
       <div style={{ color: D.sub, fontSize: '0.5rem', letterSpacing: '0.02em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
       <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.76rem', marginTop: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
     </div>
   )
-}
-function SectionLabel({ icon, text }: { icon: string; text: string }) {
+})
+const SectionLabel = memo(function SectionLabel({ icon, text }: { icon: string; text: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#F5A524', fontSize: '0.66rem', fontWeight: 800, letterSpacing: '0.08em' }}>
       <span>{icon}</span><span>{text}</span>
     </div>
   )
-}
-function BottomChip({ label, value, color, big }: { label: string; value: string; color: string; big?: boolean }) {
+})
+// Compact one-line state read-out (replaces the old boxed BottomChips):
+// a colour dot + label + value, sitting on a single wrapping line.
+const StateLine = memo(function StateLine({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div style={{ flex: big ? '1.2 1 0' : '1 1 0', background: `${color}14`, border: `1px solid ${color}55`, borderRadius: 10, padding: '5px 9px', minWidth: 0 }}>
-      <div style={{ color: D.sub, fontSize: '0.5rem', letterSpacing: '0.08em', fontWeight: 800 }}>{label.toUpperCase()}</div>
-      <div style={{ color, fontWeight: 900, fontSize: big ? '0.92rem' : '0.8rem', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value.toUpperCase()}</div>
-    </div>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, background: color, flexShrink: 0 }} />
+      <span style={{ color: D.sub, fontSize: '0.56rem', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ color, fontWeight: 900, fontSize: '0.78rem', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value.toUpperCase()}</span>
+    </span>
   )
-}
-// Linear cycle stepper — the 12-state ring as a metro rail (progress fill + dots).
-function CycleStepper({ current }: { current?: string }) {
-  const order = CYCLE_ORDER
-  const idx = current ? order.indexOf(current) : -1
-  const pct = idx > 0 ? idx / (order.length - 1) : 0
-  return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '12px 16px', background: D.panel, border: `1px solid ${D.line}`, borderRadius: 12, flexShrink: 0 }}>
-      <div style={{ position: 'absolute', left: 20, right: 20, top: '50%', height: 3, background: D.line, borderRadius: 2 }} />
-      {idx > 0 && <div style={{ position: 'absolute', left: 20, top: '50%', height: 3, borderRadius: 2, background: D.accent, width: `calc((100% - 40px) * ${pct})` }} />}
-      {order.map((s, i) => {
-        const stl = STATE_STYLE[s]
-        const done = idx >= 0 && i <= idx
-        const cur = i === idx
-        const sz = cur ? 18 : 11
-        return (
-          <div key={s} title={stl?.label} style={{ position: 'relative', zIndex: 1, width: sz, height: sz, borderRadius: 999,
-                background: done ? (stl?.color || D.accent) : '#26303b',
-                border: cur ? `3px solid ${stl?.color || D.accent}` : `2px solid ${D.line2}`,
-                boxShadow: cur ? `0 0 10px ${stl?.color || D.accent}` : 'none' }} />
-        )
-      })}
-    </div>
-  )
-}
+})
+// Linear cycle stepper removed — the Status view's haul-cycle wheel is the single
+// source of cycle progress (no duplicate bar over the map/status box).
 const secBtn: React.CSSProperties = {
   flex: 1, padding: '10px 8px', fontSize: '0.78rem', fontWeight: 700, color: D.sub2,
   background: D.panel2, border: `1px solid ${D.line2}`, borderRadius: 10, cursor: 'pointer',
