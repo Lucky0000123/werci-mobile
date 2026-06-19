@@ -15,9 +15,6 @@ import connectionManager from '../services/connectionManager'
 import { getStoredToken } from '../services/api'
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-// Free global DEM (AWS terrain tiles, terrarium encoding) for the 3D-twin mode —
-// drapes the satellite basemap + haul roads over real elevation. Public, no key.
-const TERRAIN_DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 // Our OWN high-detail site ortho-imagery, draped on top of the global satellite
 // basemap — the SAME tiles the FMS site map uses, but served through the cab's
 // mobile-auth route (/api/dispatch/site-tile). MapLibre fills {z}/{x}/{y}; the
@@ -105,18 +102,6 @@ function NavMap(props: DispatchMapProps) {
     mapRef.current = map
     map.on('error', () => { /* swallow tile/style errors — keep the map alive */ })
     map.on('load', () => {
-      // 3D-twin terrain: a raster-DEM source + sky. The terrain itself is only
-      // ENABLED when the threeD prop is on (toggled in the data effect below), so
-      // 2D MAP mode is unaffected. terrarium = AWS elevation-tiles encoding.
-      try {
-        map.addSource('dem', {
-          type: 'raster-dem', tiles: [TERRAIN_DEM], tileSize: 256,
-          encoding: 'terrarium', maxzoom: 15,
-        } as maplibregl.RasterDEMSourceSpecification)
-        // Sky only shows when pitched; harmless in flat mode.
-        map.setSky({ 'sky-color': '#8ec5ff', 'horizon-color': '#cfe6ff',
-          'fog-color': '#dfeeff', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6 } as any)
-      } catch { /* DEM/sky unsupported — degrade to the pitched 2.5D nav view */ }
       // Our OWN site ortho imagery, draped directly over the satellite basemap
       // (added FIRST so the haul lanes / route / markers below all draw on top of
       // it). Same look as the FMS site map. Only added when we have an endpoint;
@@ -172,7 +157,7 @@ function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', threeD = false, siteImagery = true } = propsRef.current
+    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', siteImagery = true } = propsRef.current
 
     // Site ortho imagery: show/hide our own high-detail tiles over the satellite
     // basemap (the FMS-site-map look). Toggled live without re-creating the map.
@@ -181,14 +166,6 @@ function NavMap(props: DispatchMapProps) {
         map.setLayoutProperty('ortho', 'visibility', siteImagery ? 'visible' : 'none')
       }
     } catch { /* ortho layer absent (no endpoint / GPU) — ignore */ }
-
-    // 3D-twin terrain: enable/disable the DEM-driven relief. Enabling drapes the
-    // satellite + haul roads over real elevation; disabling returns to flat 2D.
-    try {
-      if (map.getSource('dem')) {
-        map.setTerrain(threeD ? ({ source: 'dem', exaggeration: 1.4 } as any) : null)
-      }
-    } catch { /* terrain unsupported on this GPU — ignore, stays flat */ }
 
     // Route source: prefer the curated loaded/empty LANE segments (each tagged
     // `lane` → coloured by the line layer); else the plain fallback line.
@@ -224,30 +201,27 @@ function NavMap(props: DispatchMapProps) {
       else { destMkRef.current.setLngLat([dest.lng, dest.lat]); (destMkRef.current.getElement() as HTMLElement).style.background = dc }
     } else if (destMkRef.current) { destMkRef.current.remove(); destMkRef.current = null }
 
-    // camera: NAV mode follows the truck (pitched + heading-up); otherwise fit
-    // once. In 3D-twin mode we always keep a pitch so the terrain reads as 3D
-    // (force a re-fit when the mode flips, since the fitted-key would skip it).
+    // camera: NAV mode follows the truck (pitched + heading-up, road-in-front);
+    // otherwise fit once to show the truck + destination overview (flat).
     const navMode = !!(((routeSegments && routeSegments.length) || (route && route.length >= 2)) && truck)
-    const overviewPitch = threeD ? 55 : 0
-    const modeTag = threeD ? '3d' : '2d'
     if (navMode && truck) {
       map.easeTo({ center: [truck.lng, truck.lat], bearing: truck.course ?? map.getBearing(),
-        pitch: threeD ? 68 : 60, zoom: Math.max(map.getZoom(), 16.5), duration: 800, essential: true })
+        pitch: 60, zoom: Math.max(map.getZoom(), 16.5), duration: 800, essential: true })
     } else {
-      const key = (dest ? `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}` : (truck ? 't' : '')) + ':' + modeTag
+      const key = (dest ? `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}` : (truck ? 't' : ''))
       if (key && key !== fittedRef.current) {
         fittedRef.current = key
         if (truck && dest) {
           const b = new maplibregl.LngLatBounds([truck.lng, truck.lat], [truck.lng, truck.lat])
           b.extend([dest.lng, dest.lat])
-          map.fitBounds(b, { padding: 60, pitch: overviewPitch, bearing: 0, maxZoom: 16, duration: 600 })
+          map.fitBounds(b, { padding: 60, pitch: 0, bearing: 0, maxZoom: 16, duration: 600 })
         } else if (truck) {
-          map.easeTo({ center: [truck.lng, truck.lat], zoom: 15, pitch: overviewPitch, bearing: 0, duration: 600 })
+          map.easeTo({ center: [truck.lng, truck.lat], zoom: 15, pitch: 0, bearing: 0, duration: 600 })
         }
       }
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
-      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.threeD, props.siteImagery])
+      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.siteImagery])
 
   if (glFailed) return <DispatchMap {...props} />
 

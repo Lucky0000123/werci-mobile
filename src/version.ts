@@ -7,6 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.26.0 — Removed the 3D twin map from the truck OUI. The driver map is now
+ *          a single flat 2D nav view (MAP / STATUS toggle only) — heading-up,
+ *          follows the truck, with the SITE ortho imagery + haul lanes + route
+ *          on top. The raster-DEM terrain/sky 3D mode (added in 2.24.0) is gone
+ *          per ops feedback (not wanted in-cab); the 🛰 SITE / SAT basemap
+ *          toggle stays.
  * 2.25.0 — In-cab SITE imagery basemap. The driver map can now drape our OWN
  *          high-detail site ortho-imagery (the same tiles the FMS site map uses)
  *          over the global satellite basemap, with the haul lanes / route / truck
@@ -186,4 +192,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.25.0'
+export const APP_VERSION = '2.26.0'

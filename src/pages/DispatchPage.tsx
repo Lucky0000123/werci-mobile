@@ -163,7 +163,7 @@ export default function DispatchPage() {
   const [result, setResult] = useState<ConnectResult | null>(null)
   const [connectedUnit, setConnectedUnit] = useState('')
   const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
-  const [viewMode, setViewMode] = useState<'map' | '3d' | 'status'>('map')
+  const [viewMode, setViewMode] = useState<'map' | 'status'>('map')
   // Employee-ID keyboard: numeric by default (IDs are mostly digits), with an
   // in-app 123/ABC toggle since the OS numeric pad has no letter switch.
   const [idMode, setIdMode] = useState<'numeric' | 'text'>('numeric')
@@ -537,7 +537,7 @@ type OpExcavator = {
 // ════════════════════════════════════════════════════════════════════════
 function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   { employeeId: string; truckNo: string; driverName?: string;
-    viewMode: 'map' | '3d' | 'status'; setViewMode: (m: 'map' | '3d' | 'status') => void }) {
+    viewMode: 'map' | 'status'; setViewMode: (m: 'map' | 'status') => void }) {
   const dt = useDispatchT()
   const [truck, setTruck] = useState<OpTruck | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
@@ -790,11 +790,6 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 color: viewMode === 'map' ? '#0b0f17' : D.sub,
                 background: viewMode === 'map' ? '#38BDF8' : 'transparent', cursor: 'pointer',
               }}>MAP</button>
-              <button onClick={() => setViewMode('3d')} style={{
-                flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
-                color: viewMode === '3d' ? '#0b0f17' : D.sub,
-                background: viewMode === '3d' ? '#38BDF8' : 'transparent', cursor: 'pointer',
-              }}>3D</button>
               <button onClick={() => setViewMode('status')} style={{
                 flex: 1, padding: '7px 8px', borderRadius: 8, border: 'none', fontWeight: 800, fontSize: '0.78rem',
                 color: viewMode === 'status' ? '#0b0f17' : D.sub,
@@ -815,21 +810,20 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
             ) : (
               <>
                 {/* Map layer — always mounted, opacity-switched for instant
-                    toggling. MAP = flat 2D, 3D = the same nav map with raster-DEM
-                    terrain + sky (same MapLibre instance, threeD prop). */}
+                    toggling. Flat 2D nav map (heading-up, follows the truck). */}
                 <div style={{
-                  position: 'absolute', inset: 0, opacity: (viewMode === 'map' || viewMode === '3d') ? 1 : 0,
-                  pointerEvents: (viewMode === 'map' || viewMode === '3d') ? 'auto' : 'none', zIndex: (viewMode === 'map' || viewMode === '3d') ? 1 : 0,
+                  position: 'absolute', inset: 0, opacity: viewMode === 'map' ? 1 : 0,
+                  pointerEvents: viewMode === 'map' ? 'auto' : 'none', zIndex: viewMode === 'map' ? 1 : 0,
                   transition: 'opacity 0.12s ease',
                 }}>
                   <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
                           destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
-                          height="100%" visible={viewMode === 'map' || viewMode === '3d'} threeD={viewMode === '3d'}
+                          height="100%" visible={viewMode === 'map'}
                           siteImagery={siteImagery} />
                 </div>
                 {/* SAT / SITE basemap toggle: SITE drapes our own high-detail
                     ortho imagery (the FMS-site-map look); SAT is plain satellite. */}
-                {(viewMode === 'map' || viewMode === '3d') && (
+                {viewMode === 'map' && (
                   <button onClick={() => setSiteImagery((v) => !v)} style={{
                     position: 'absolute', right: 12, top: 12, zIndex: 500, cursor: 'pointer',
                     background: 'rgba(8,12,20,0.78)', border: `1px solid ${siteImagery ? '#38BDF8' : D.line2}`,
@@ -839,7 +833,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                     <span style={{ fontSize: '0.86rem' }}>🛰</span>{siteImagery ? 'SITE' : 'SAT'}
                   </button>
                 )}
-                {(viewMode === 'map' || viewMode === '3d') && speedKph != null && (
+                {viewMode === 'map' && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '1.8rem', fontWeight: 900, color: speedKph > 0 ? '#86EFAC' : D.ink, lineHeight: 1 }}>{speedKph}</span>

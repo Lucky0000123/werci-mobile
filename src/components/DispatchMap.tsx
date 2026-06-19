@@ -21,9 +21,6 @@ export interface DispatchMapProps {
   roads?: GeoJSON.FeatureCollection | null    // optional empty/full lane overlay
   height?: number | string
   visible?: boolean
-  // 3D twin mode (NavMap only): adds raster-DEM terrain + sky so the haul roads
-  // drape over real elevation. Ignored by the Leaflet fallback (2D only).
-  threeD?: boolean
   // Site ortho imagery overlay (NavMap only): drapes our OWN high-detail site
   // tiles (the FMS-site-map imagery) over the satellite basemap. Default on.
   siteImagery?: boolean
