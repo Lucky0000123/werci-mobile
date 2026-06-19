@@ -11,11 +11,23 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import DispatchMap from './DispatchMap'
 import type { DispatchMapProps } from './DispatchMap'
+import connectionManager from '../services/connectionManager'
+import { getStoredToken } from '../services/api'
 
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 // Free global DEM (AWS terrain tiles, terrarium encoding) for the 3D-twin mode —
 // drapes the satellite basemap + haul roads over real elevation. Public, no key.
 const TERRAIN_DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+// Our OWN high-detail site ortho-imagery, draped on top of the global satellite
+// basemap — the SAME tiles the FMS site map uses, but served through the cab's
+// mobile-auth route (/api/dispatch/site-tile). MapLibre fills {z}/{x}/{y}; the
+// backend cache (Docker volume) is shared with the manager web map. Where there
+// is no ortho tile (outside the imaged area / above z18) the satellite shows
+// through, exactly like the FMS map. The {base} placeholder is swapped for the
+// active endpoint at map-init; the Bearer token is attached via transformRequest.
+const SITE_TILE_PATH = '/api/dispatch/site-tile/{z}/{x}_{y}.webp'
+const SITE_TILES_MINZOOM = 12
+const SITE_TILES_MAXZOOM = 18
 
 type FC = GeoJSON.FeatureCollection
 const EMPTY: FC = { type: 'FeatureCollection', features: [] }
@@ -58,6 +70,13 @@ function NavMap(props: DispatchMapProps) {
   // init once
   useEffect(() => {
     if (!elRef.current || mapRef.current || glFailed) return
+    // Resolve the active backend once at init: the ortho site tiles are served
+    // by OUR server (cab mobile-auth), so the tile URL must point at whichever
+    // endpoint Diagnostics picked (LAN or cloud tunnel). transformRequest then
+    // attaches the Bearer token to every site-tile fetch (raster sources can't
+    // carry an Authorization header on their own).
+    const apiBase = (connectionManager.getActiveEndpoint() || '').replace(/\/$/, '')
+    const siteTilesUrl = apiBase ? apiBase + SITE_TILE_PATH : ''
     let map: maplibregl.Map
     try {
       map = new maplibregl.Map({
@@ -70,6 +89,15 @@ function NavMap(props: DispatchMapProps) {
         center: [128.0208, 0.6510], zoom: 14, pitch: 0, bearing: 0,
         attributionControl: false,
         interactive: false,   // locked: no finger pan/zoom/rotate — camera follows the truck only
+        transformRequest: (url) => {
+          // Only our own site-tile route needs the auth header; leave the public
+          // Esri/terrain CDNs untouched (a stray header there can break caching).
+          if (siteTilesUrl && url.indexOf('/api/dispatch/site-tile/') !== -1) {
+            const token = getStoredToken()
+            return token ? { url, headers: { Authorization: `Bearer ${token}` } } : { url }
+          }
+          return { url }
+        },
       })
     } catch {
       setGlFailed(true); return
@@ -89,6 +117,24 @@ function NavMap(props: DispatchMapProps) {
         map.setSky({ 'sky-color': '#8ec5ff', 'horizon-color': '#cfe6ff',
           'fog-color': '#dfeeff', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6 } as any)
       } catch { /* DEM/sky unsupported — degrade to the pitched 2.5D nav view */ }
+      // Our OWN site ortho imagery, draped directly over the satellite basemap
+      // (added FIRST so the haul lanes / route / markers below all draw on top of
+      // it). Same look as the FMS site map. Only added when we have an endpoint;
+      // missing tiles 404 quietly (transformRequest + the map 'error' swallow) and
+      // the satellite shows through. Visibility is toggled by the siteImagery prop.
+      if (siteTilesUrl) {
+        try {
+          map.addSource('ortho', {
+            type: 'raster', tiles: [siteTilesUrl], tileSize: 256,
+            minzoom: SITE_TILES_MINZOOM, maxzoom: SITE_TILES_MAXZOOM,
+          } as maplibregl.RasterSourceSpecification)
+          map.addLayer({
+            id: 'ortho', type: 'raster', source: 'ortho',
+            layout: { visibility: (propsRef.current.siteImagery !== false) ? 'visible' : 'none' },
+            paint: { 'raster-opacity': 1 },
+          })
+        } catch { /* raster overlay unsupported — stays on plain satellite */ }
+      }
       map.addSource('lanes', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'lanes-line', type: 'line', source: 'lanes',
         paint: { 'line-color': ['match', ['get', 'loaded_side'], 'left', '#38BDF8', 'right', '#38BDF8', '#94A3B8'], 'line-width': 2, 'line-opacity': 0.5 } })
@@ -126,7 +172,15 @@ function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', threeD = false } = propsRef.current
+    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', threeD = false, siteImagery = true } = propsRef.current
+
+    // Site ortho imagery: show/hide our own high-detail tiles over the satellite
+    // basemap (the FMS-site-map look). Toggled live without re-creating the map.
+    try {
+      if (map.getLayer('ortho')) {
+        map.setLayoutProperty('ortho', 'visibility', siteImagery ? 'visible' : 'none')
+      }
+    } catch { /* ortho layer absent (no endpoint / GPU) — ignore */ }
 
     // 3D-twin terrain: enable/disable the DEM-driven relief. Enabling drapes the
     // satellite + haul roads over real elevation; disabling returns to flat 2D.
@@ -193,7 +247,7 @@ function NavMap(props: DispatchMapProps) {
       }
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
-      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.threeD])
+      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.threeD, props.siteImagery])
 
   if (glFailed) return <DispatchMap {...props} />
 

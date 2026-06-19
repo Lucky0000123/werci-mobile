@@ -547,6 +547,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; dumpZoneM?: number }>({})
   const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number } | null>(null)
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
+  const [siteImagery, setSiteImagery] = useState(true)   // SITE ortho overlay (FMS-map imagery) vs plain satellite
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
   const [routeSegments, setRouteSegments] = useState<{ lane: string; coordinates: [number, number][] }[] | null>(null)
   const [otherLoading, setOtherLoading] = useState(false)
@@ -823,8 +824,21 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 }}>
                   <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
                           destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
-                          height="100%" visible={viewMode === 'map' || viewMode === '3d'} threeD={viewMode === '3d'} />
+                          height="100%" visible={viewMode === 'map' || viewMode === '3d'} threeD={viewMode === '3d'}
+                          siteImagery={siteImagery} />
                 </div>
+                {/* SAT / SITE basemap toggle: SITE drapes our own high-detail
+                    ortho imagery (the FMS-site-map look); SAT is plain satellite. */}
+                {(viewMode === 'map' || viewMode === '3d') && (
+                  <button onClick={() => setSiteImagery((v) => !v)} style={{
+                    position: 'absolute', right: 12, top: 12, zIndex: 500, cursor: 'pointer',
+                    background: 'rgba(8,12,20,0.78)', border: `1px solid ${siteImagery ? '#38BDF8' : D.line2}`,
+                    borderRadius: 10, padding: '6px 11px', display: 'flex', alignItems: 'center', gap: 6,
+                    color: siteImagery ? '#38BDF8' : D.sub, fontWeight: 800, fontSize: '0.72rem',
+                  }}>
+                    <span style={{ fontSize: '0.86rem' }}>🛰</span>{siteImagery ? 'SITE' : 'SAT'}
+                  </button>
+                )}
                 {(viewMode === 'map' || viewMode === '3d') && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>

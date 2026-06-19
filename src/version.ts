@@ -7,6 +7,13 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.25.0 — In-cab SITE imagery basemap. The driver map can now drape our OWN
+ *          high-detail site ortho-imagery (the same tiles the FMS site map uses)
+ *          over the global satellite basemap, with the haul lanes / route / truck
+ *          on top — so the cab map looks like the FMS site map, not generic Esri
+ *          satellite. New 🛰 SITE / SAT toggle on the map (default SITE). Served
+ *          through a cab-token route (/api/dispatch/site-tile) sharing the backend
+ *          tile cache; where there's no ortho tile the satellite shows through.
  * 2.24.0 — In-cab OUI hardening + 3D twin map. (1) A driver is NEVER blocked
  *          from connecting to any excavator/dump truck — expired/again-missing
  *          KIMPER only raises a visible warning chip, never a dead-end. (2) The
@@ -179,4 +186,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.24.0'
+export const APP_VERSION = '2.25.0'
