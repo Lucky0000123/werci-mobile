@@ -18,6 +18,7 @@ import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
+import { useI18n, type Language } from '../services/i18n-context'
 import NavMap from '../components/NavMap'
 import { TruckStatusPanel } from '../components/TruckStatusPanel'
 import ExcavatorOuiPanel from '../components/ExcavatorOuiPanel'
@@ -158,8 +159,10 @@ function inkOn(hex: string): string {
   return lum > 0.6 ? '#0F172A' : '#ffffff'
 }
 
-export default function DispatchPage() {
+export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   const dt = useDispatchT()
+  const { language, setLanguage } = useI18n()
+  const [showLangMenu, setShowLangMenu] = useState(false)
   const [employeeId, setEmployeeId] = useState('')
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileOffline, setProfileOffline] = useState(false)
@@ -409,14 +412,68 @@ export default function DispatchPage() {
           </div>
           <div style={{ color: F.sub, fontSize: '0.72rem', fontWeight: 600 }}>Fleet Management · In-Cab Dispatch</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7,
-                      fontSize: '0.72rem', fontWeight: 700, color: online ? F.green : F.amber,
-                      background: online ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
-                      border: `1px solid ${online ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)'}`,
-                      borderRadius: 999, padding: '5px 12px', whiteSpace: 'nowrap' }}>
-          <span style={{ width: 7, height: 7, borderRadius: 999, background: online ? F.green : F.amber,
-                         boxShadow: `0 0 8px ${online ? F.green : F.amber}` }} />
-          {online ? 'ONLINE' : 'OFFLINE'}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7,
+                        fontSize: '0.72rem', fontWeight: 700, color: online ? F.green : F.amber,
+                        background: online ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+                        border: `1px solid ${online ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)'}`,
+                        borderRadius: 999, padding: '5px 12px', whiteSpace: 'nowrap' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 999, background: online ? F.green : F.amber,
+                           boxShadow: `0 0 8px ${online ? F.green : F.amber}` }} />
+            {online ? 'ONLINE' : 'OFFLINE'}
+          </div>
+
+          {/* Language switcher — operators may not read English; keep it on the
+              entry screen since the in-cab session hides the app header/nav. */}
+          <div style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setShowLangMenu((v) => !v)}
+                    aria-label={dt('language')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px',
+                             fontSize: '0.74rem', fontWeight: 800, color: F.sub2,
+                             background: F.panel, border: `1px solid ${F.line2}`, borderRadius: 999, cursor: 'pointer' }}>
+              <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>
+                {language === 'id' ? '🇮🇩' : language === 'zh' ? '🇨🇳' : '🇬🇧'}
+              </span>
+              <span>{language.toUpperCase()}</span>
+            </button>
+            {showLangMenu && (
+              <>
+                <div onClick={() => setShowLangMenu(false)}
+                     style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 41,
+                              background: F.panelHi, border: `1px solid ${F.line2}`, borderRadius: 12,
+                              boxShadow: '0 18px 40px rgba(0,0,0,0.6)', overflow: 'hidden', minWidth: 170 }}>
+                  {[
+                    { lang: 'id' as Language, flag: '🇮🇩', label: 'Bahasa Indonesia' },
+                    { lang: 'en' as Language, flag: '🇬🇧', label: 'English' },
+                    { lang: 'zh' as Language, flag: '🇨🇳', label: '中文' },
+                  ].map(({ lang, flag, label }) => (
+                    <button key={lang} onClick={() => { setLanguage(lang); setShowLangMenu(false) }}
+                            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                                     padding: '11px 14px', fontSize: '0.86rem', fontWeight: 600, textAlign: 'left',
+                                     cursor: 'pointer', border: 'none', borderBottom: `1px solid ${F.line}`,
+                                     background: language === lang ? 'rgba(245,165,36,0.15)' : 'transparent',
+                                     color: language === lang ? F.gold : F.sub2 }}>
+                      <span>{flag}</span><span>{label}</span>
+                      {language === lang && <span style={{ marginLeft: 'auto', color: F.gold }}>✓</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Exit — leave the dispatch entry screen back to the login / mode
+              picker, for a normal employee-card user who isn't on an FMS device. */}
+          {onExit && (
+            <button type="button" onClick={onExit} aria-label={dt('sign_out')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px',
+                             fontSize: '0.74rem', fontWeight: 800, color: '#fca5a5',
+                             background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.4)',
+                             borderRadius: 999, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              ⎋ {dt('sign_out')}
+            </button>
+          )}
         </div>
       </header>
 
@@ -595,11 +652,12 @@ type OpTruck = {
   distance_m?: number | null; live?: boolean; connected?: boolean; plan_status?: string
   state?: string; state_label?: string; state_color?: string; time_in_state_s?: number | null
   lat?: number | null; lng?: number | null
+  reporting?: boolean; departed?: boolean; last_zone?: string | null; zone_changed?: string | null
 }
 type OpExcavator = {
   excavator_no?: string; plan_id?: number; shift?: string; plan_date?: string | null
   loading_location_name?: string | null; dump_location_name?: string | null
-  loading_zone_m?: number; waiting_zone_m?: number
+  loading_zone_m?: number; waiting_zone_m?: number; discovery_zone_m?: number
   lat?: number | null; lng?: number | null
   dump_lat?: number | null; dump_lng?: number | null; dump_zone_m?: number
   exc_status?: string; exc_status_color?: string; exc_status_label?: string; next_truck_no?: string | null
@@ -617,10 +675,9 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [excavatorNo, setExcavatorNo] = useState<string | null>(null)
   const [loadingLoc, setLoadingLoc] = useState<string | null>(null)
   const [dumpLoc, setDumpLoc] = useState<string | null>(null)
-  const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; dumpZoneM?: number }>({})
+  const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; waitingZoneM?: number; discoveryZoneM?: number; dumpZoneM?: number }>({})
   const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number } | null>(null)
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
-  const [siteImagery, setSiteImagery] = useState(true)   // SITE ortho overlay (FMS-map imagery) vs plain satellite
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
   const [routeSegments, setRouteSegments] = useState<{ lane: string; coordinates: [number, number][] }[] | null>(null)
   const [otherLoading, setOtherLoading] = useState(false)
@@ -642,7 +699,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       setLoadingLoc(exc?.loading_location_name ?? null); setDumpLoc(exc?.dump_location_name ?? null)
       setShiftDate(exc?.shift, exc?.plan_date)
       setGeo({ excLat: exc?.lat, excLng: exc?.lng, dumpLat: exc?.dump_lat, dumpLng: exc?.dump_lng,
-               loadingZoneM: exc?.loading_zone_m, dumpZoneM: exc?.dump_zone_m })
+               loadingZoneM: exc?.loading_zone_m, waitingZoneM: exc?.waiting_zone_m,
+               discoveryZoneM: exc?.discovery_zone_m, dumpZoneM: exc?.dump_zone_m })
     }
     async function tick() {
       try {
@@ -751,6 +809,15 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     ? (geo.dumpLat != null && geo.dumpLng != null ? { lat: geo.dumpLat, lng: geo.dumpLng } : null)
     : (geo.excLat != null && geo.excLng != null ? { lat: geo.excLat, lng: geo.excLng } : null)
   const geofenceM = isFull ? (geo.dumpZoneM ?? 50) : (geo.loadingZoneM ?? 10)
+  // Moving multi-ring geofences around the SHOVEL on the empty/inbound leg —
+  // colour-coded Discovery (100m) / Waiting (20m) / Loading (10m) circles that
+  // follow the excavator's live GPS, so the driver sees the zones as they near
+  // the loader. On a full leg the single dump geofence is used instead.
+  const rings = !isFull && dest ? [
+    { radiusM: geo.discoveryZoneM ?? 100, color: '#38BDF8', label: dt('zone_discovery'), dashed: true },
+    { radiusM: geo.waitingZoneM ?? 20, color: '#FFE600', label: dt('zone_waiting') },
+    { radiusM: geo.loadingZoneM ?? 10, color: '#FF4FB8', label: dt('zone_loading') },
+  ] : null
   const truckPt = (tel?.lat != null && tel?.lng != null)
     ? { lat: tel.lat, lng: tel.lng, course: tel.course }
     : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
@@ -891,26 +958,49 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 }}>
                   <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
                           destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
-                          height="100%" visible={viewMode === 'map'}
-                          siteImagery={siteImagery} />
+                          rings={rings}
+                          height="100%" visible={viewMode === 'map'} />
                 </div>
-                {/* SAT / SITE basemap toggle: SITE drapes our own high-detail
-                    ortho imagery (the FMS-site-map look); SAT is plain satellite. */}
-                {viewMode === 'map' && (
-                  <button onClick={() => setSiteImagery((v) => !v)} style={{
-                    position: 'absolute', right: 12, top: 12, zIndex: 500, cursor: 'pointer',
-                    background: 'rgba(8,12,20,0.78)', border: `1px solid ${siteImagery ? '#38BDF8' : D.line2}`,
-                    borderRadius: 10, padding: '6px 11px', display: 'flex', alignItems: 'center', gap: 6,
-                    color: siteImagery ? '#38BDF8' : D.sub, fontWeight: 800, fontSize: '0.72rem',
-                  }}>
-                    <span style={{ fontSize: '0.86rem' }}>🛰</span>{siteImagery ? 'SITE' : 'SAT'}
-                  </button>
-                )}
                 {viewMode === 'map' && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',
                                 border: `1px solid ${D.line2}`, borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                     <span style={{ fontFamily: 'monospace', fontSize: '1.8rem', fontWeight: 900, color: speedKph > 0 ? '#86EFAC' : D.ink, lineHeight: 1 }}>{speedKph}</span>
                     <span style={{ color: D.sub, fontSize: '0.62rem', fontWeight: 700 }}>km/h</span>
+                  </div>
+                )}
+                {/* Moving-geofence legend — the colour-coded Discovery/Waiting/
+                    Loading rings that follow the shovel, with the truck's CURRENT
+                    zone highlighted. Only on the empty/inbound (loading) leg. */}
+                {viewMode === 'map' && rings && (
+                  <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.82)',
+                                border: `1px solid ${D.line2}`, borderRadius: 12, padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {[
+                      { z: 'loading', m: geo.loadingZoneM ?? 10, c: '#FF4FB8', l: dt('zone_loading') },
+                      { z: 'waiting', m: geo.waitingZoneM ?? 20, c: '#FFE600', l: dt('zone_waiting') },
+                      { z: 'discovery', m: geo.discoveryZoneM ?? 100, c: '#38BDF8', l: dt('zone_discovery') },
+                    ].map((r) => {
+                      const active = truck?.zone === r.z
+                      return (
+                        <div key={r.z} style={{ display: 'flex', alignItems: 'center', gap: 7, opacity: active ? 1 : 0.62 }}>
+                          <span style={{ width: 11, height: 11, borderRadius: '50%', border: `2px solid ${r.c}`,
+                                         background: active ? r.c : 'transparent', boxShadow: active ? `0 0 7px ${r.c}` : 'none', flexShrink: 0 }} />
+                          <span style={{ color: active ? r.c : D.sub, fontSize: '0.66rem', fontWeight: active ? 900 : 700 }}>{r.l}</span>
+                          <span style={{ color: D.sub, fontSize: '0.58rem', fontWeight: 600, marginLeft: 'auto' }}>{r.m}m</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {/* Approach / departure cue banner (Reporting → Loaded/Departed). */}
+                {viewMode === 'map' && (truck?.reporting || truck?.departed) && (
+                  <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 500,
+                                background: truck?.departed ? 'rgba(134,239,172,0.16)' : 'rgba(56,189,248,0.16)',
+                                border: `1px solid ${truck?.departed ? '#86EFAC' : '#38BDF8'}`, borderRadius: 12, padding: '7px 12px',
+                                display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '0.9rem' }}>{truck?.departed ? '✅' : '📡'}</span>
+                    <span style={{ color: truck?.departed ? '#86EFAC' : '#38BDF8', fontWeight: 900, fontSize: '0.74rem', letterSpacing: '0.04em' }}>
+                      {truck?.departed ? dt('departed') : dt('reporting')}
+                    </span>
                   </div>
                 )}
                 {/* Status layer — always mounted, opacity-switched */}

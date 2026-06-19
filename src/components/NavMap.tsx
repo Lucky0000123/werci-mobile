@@ -14,14 +14,13 @@ import type { DispatchMapProps } from './DispatchMap'
 import connectionManager from '../services/connectionManager'
 import { getStoredToken } from '../services/api'
 
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-// Our OWN high-detail site ortho-imagery, draped on top of the global satellite
-// basemap — the SAME tiles the FMS site map uses, but served through the cab's
-// mobile-auth route (/api/dispatch/site-tile). MapLibre fills {z}/{x}/{y}; the
-// backend cache (Docker volume) is shared with the manager web map. Where there
-// is no ortho tile (outside the imaged area / above z18) the satellite shows
-// through, exactly like the FMS map. The {base} placeholder is swapped for the
-// active endpoint at map-init; the Bearer token is attached via transformRequest.
+// Our OWN high-detail site ortho-imagery is the cab map's ONLY basemap — the
+// SAME tiles the FMS site map uses, served through the cab's mobile-auth route
+// (/api/dispatch/site-tile). MapLibre fills {z}/{x}/{y}; the backend cache
+// (Docker volume) is shared with the manager web map. Where there is no ortho
+// tile (outside the imaged area / above z18) the dark background shows through.
+// The active endpoint is resolved at map-init; the Bearer token is attached
+// via transformRequest.
 const SITE_TILE_PATH = '/api/dispatch/site-tile/{z}/{x}_{y}.webp'
 const SITE_TILES_MINZOOM = 12
 const SITE_TILES_MAXZOOM = 18
@@ -38,6 +37,23 @@ function circlePolygon(lng: number, lat: number, radiusM: number, n = 48): FC {
     ring.push([lng + dLng * Math.cos(t), lat + dLat * Math.sin(t)])
   }
   return { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [ring] }, properties: {} }] }
+}
+
+// One FeatureCollection holding the concentric MOVING geofence rings (Discovery
+// /Waiting/Loading) centred on the shovel, each tagged with its own colour so a
+// single data-driven line/fill layer renders all of them. Largest first so the
+// inner rings draw on top.
+function ringsFC(lng: number, lat: number, rings: { radiusM: number; color: string }[]): FC {
+  const sorted = [...rings].sort((a, b) => b.radiusM - a.radiusM)
+  return {
+    type: 'FeatureCollection',
+    features: sorted.map((r) => {
+      const poly = circlePolygon(lng, lat, r.radiusM)
+      const f = poly.features[0] as GeoJSON.Feature
+      f.properties = { color: r.color }
+      return f
+    }),
+  }
 }
 
 function vehicleEl(color: string): HTMLDivElement {
@@ -80,8 +96,12 @@ function NavMap(props: DispatchMapProps) {
         container: elRef.current,
         style: {
           version: 8,
-          sources: { sat: { type: 'raster', tiles: [ESRI], tileSize: 256, maxzoom: 19 } },
-          layers: [{ id: 'sat', type: 'raster', source: 'sat' }],
+          sources: {},
+          // No global satellite basemap — the cab map shows ONLY our own site
+          // ortho imagery (added on 'load' below) over a dark backdrop, matching
+          // the FMS site map. Where there's no ortho tile the dark background
+          // shows instead of generic Esri satellite.
+          layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#0a0e14' } }],
         },
         center: [128.0208, 0.6510], zoom: 14, pitch: 0, bearing: 0,
         attributionControl: false,
@@ -102,11 +122,11 @@ function NavMap(props: DispatchMapProps) {
     mapRef.current = map
     map.on('error', () => { /* swallow tile/style errors — keep the map alive */ })
     map.on('load', () => {
-      // Our OWN site ortho imagery, draped directly over the satellite basemap
-      // (added FIRST so the haul lanes / route / markers below all draw on top of
-      // it). Same look as the FMS site map. Only added when we have an endpoint;
-      // missing tiles 404 quietly (transformRequest + the map 'error' swallow) and
-      // the satellite shows through. Visibility is toggled by the siteImagery prop.
+      // Our OWN site ortho imagery is the ONLY basemap (added FIRST so the haul
+      // lanes / route / markers below all draw on top of it). Same look as the
+      // FMS site map. Only added when we have an endpoint; missing tiles 404
+      // quietly (transformRequest + the map 'error' swallow) and the dark
+      // background shows through (no global satellite).
       if (siteTilesUrl) {
         try {
           map.addSource('ortho', {
@@ -115,10 +135,9 @@ function NavMap(props: DispatchMapProps) {
           } as maplibregl.RasterSourceSpecification)
           map.addLayer({
             id: 'ortho', type: 'raster', source: 'ortho',
-            layout: { visibility: (propsRef.current.siteImagery !== false) ? 'visible' : 'none' },
             paint: { 'raster-opacity': 1 },
           })
-        } catch { /* raster overlay unsupported — stays on plain satellite */ }
+        } catch { /* raster overlay unsupported — dark background only */ }
       }
       map.addSource('lanes', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'lanes-line', type: 'line', source: 'lanes',
@@ -126,6 +145,11 @@ function NavMap(props: DispatchMapProps) {
       map.addSource('geo', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'geo-fill', type: 'fill', source: 'geo', paint: { 'fill-color': '#A16207', 'fill-opacity': 0.12 } })
       map.addLayer({ id: 'geo-line', type: 'line', source: 'geo', paint: { 'line-color': '#A16207', 'line-width': 2 } })
+      // Moving multi-ring geofences (Discovery/Waiting/Loading) — colour per
+      // feature so one fill + one line layer renders all rings around the shovel.
+      map.addSource('rings', { type: 'geojson', data: EMPTY })
+      map.addLayer({ id: 'rings-fill', type: 'fill', source: 'rings', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.07 } })
+      map.addLayer({ id: 'rings-line', type: 'line', source: 'rings', paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.9 } })
       map.addSource('route', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'route-cap', type: 'line', source: 'route', paint: { 'line-color': '#0b1220', 'line-width': 9, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': ['match', ['get', 'lane'], 'empty', '#15803d', 'loaded', '#c2410c', 'route', '#f59e0b', '#c2410c'], 'line-width': 5.5 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
@@ -157,15 +181,7 @@ function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, geofenceM, route, routeSegments, roads, destKind = 'dump', stateColor = '#38BDF8', siteImagery = true } = propsRef.current
-
-    // Site ortho imagery: show/hide our own high-detail tiles over the satellite
-    // basemap (the FMS-site-map look). Toggled live without re-creating the map.
-    try {
-      if (map.getLayer('ortho')) {
-        map.setLayoutProperty('ortho', 'visibility', siteImagery ? 'visible' : 'none')
-      }
-    } catch { /* ortho layer absent (no endpoint / GPU) — ignore */ }
+    const { truck, dest, geofenceM, route, routeSegments, roads, rings, destKind = 'dump', stateColor = '#38BDF8' } = propsRef.current
 
     // Route source: prefer the curated loaded/empty LANE segments (each tagged
     // `lane` → coloured by the line layer); else the plain fallback line.
@@ -177,8 +193,13 @@ function NavMap(props: DispatchMapProps) {
           : EMPTY)
     ;(map.getSource('route') as maplibregl.GeoJSONSource | undefined)?.setData(routeData)
     ;(map.getSource('lanes') as maplibregl.GeoJSONSource | undefined)?.setData((roads as FC) || EMPTY)
+    // Moving geofence rings (Discovery/Waiting/Loading) follow the shovel. When
+    // present they REPLACE the single dump/loading circle (geo source emptied).
+    const haveRings = !!(rings && rings.length && dest)
+    ;(map.getSource('rings') as maplibregl.GeoJSONSource | undefined)?.setData(
+      haveRings ? ringsFC(dest!.lng, dest!.lat, rings!) : EMPTY)
     ;(map.getSource('geo') as maplibregl.GeoJSONSource | undefined)?.setData(
-      dest && geofenceM ? circlePolygon(dest.lng, dest.lat, geofenceM) : EMPTY)
+      (!haveRings && dest && geofenceM) ? circlePolygon(dest.lng, dest.lat, geofenceM) : EMPTY)
 
     const dc = destKind === 'loading' ? '#22C55E' : '#A16207'
     if (map.getLayer('geo-fill')) map.setPaintProperty('geo-fill', 'fill-color', dc)
@@ -221,7 +242,7 @@ function NavMap(props: DispatchMapProps) {
       }
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
-      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.siteImagery])
+      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.rings])
 
   if (glFailed) return <DispatchMap {...props} />
 

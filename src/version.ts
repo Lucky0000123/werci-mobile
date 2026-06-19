@@ -7,6 +7,29 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.29.0 — Sign-on usability + site-only map. (1) The FMS sign-on header now has
+ *          a LANGUAGE switcher (🇮🇩/🇬🇧/🇨🇳) and a SIGN OUT button, so an operator
+ *          on a shared device — or a normal employee-card user who landed on the
+ *          dispatch screen — can switch language or return to the login / mode
+ *          picker (the in-cab session hides the app header + bottom nav, which
+ *          previously left no way back). (2) The driver map drops the global Esri
+ *          SATELLITE basemap entirely: it now shows ONLY our own high-detail SITE
+ *          ortho imagery (the FMS-site-map tiles) over a dark backdrop, so the
+ *          🛰 SITE/SAT toggle is gone — the cab map always matches the FMS site
+ *          map. Where there's no ortho tile the dark background shows instead of
+ *          generic satellite.
+ * 2.28.0 — Moving loading zones (dynamic geofences) for the in-cab driver map.
+ *          The shovel now carries three colour-coded rings that FOLLOW its live
+ *          GPS, drawn on the empty/inbound leg: Discovery 100 m (cyan, dashed —
+ *          the invisible handshake/approach ring), Waiting 20 m (yellow) and
+ *          Loading 10 m (pink). A live legend highlights the truck's CURRENT
+ *          zone, and an approach banner shows "Reporting" when the truck enters
+ *          the discovery ring and "Loaded / Departed" when a loaded truck leaves
+ *          the waiting ring. Server-authoritative: the bands + enter/exit events
+ *          are computed from the excavator's live position every board poll
+ *          (PRISM_ZONE_EVENTS, last_zone column) so the cab does zero extra GPS
+ *          work. NavMap (MapLibre) + DispatchMap (Leaflet fallback) both render
+ *          the rings; en/id/zh strings added.
  * 2.27.0 — Professional FMS sign-on redesign. The in-cab "Connect Unit"
  *          (employee ID + unit number) entry screen is rebuilt to look like a
  *          real FMS product instead of a plain light form: a dark shell with a
@@ -201,4 +224,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.27.0'
+export const APP_VERSION = '2.29.0'

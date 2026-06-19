@@ -9,6 +9,13 @@ import { useEffect, useRef, memo } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+export interface ZoneRing {
+  radiusM: number
+  color: string
+  label?: string
+  dashed?: boolean
+}
+
 export interface DispatchMapProps {
   truck: { lat: number; lng: number; course?: number | null } | null
   dest: { lat: number; lng: number } | null
@@ -19,22 +26,23 @@ export interface DispatchMapProps {
   route?: [number, number][] | null          // [lat,lng] along the haul roads (fallback line)
   routeSegments?: { lane: string; coordinates: [number, number][] }[] | null  // [lng,lat] loaded/empty
   roads?: GeoJSON.FeatureCollection | null    // optional empty/full lane overlay
+  // Concentric MOVING geofence rings around the destination (the excavator when
+  // empty/inbound): e.g. Discovery 100m / Waiting 20m / Loading 10m. When set
+  // these replace the single `geofenceM` circle so the driver sees the colour-
+  // coded zones that follow the shovel. Innermost should be LAST (drawn on top).
+  rings?: ZoneRing[] | null
   height?: number | string
   visible?: boolean
-  // Site ortho imagery overlay (NavMap only): drapes our OWN high-detail site
-  // tiles (the FMS-site-map imagery) over the satellite basemap. Default on.
-  siteImagery?: boolean
 }
 
-const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 const NAV_ZOOM = 16
 
 function DispatchMap({
-  truck, dest, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, height = 260, visible,
+  truck, dest, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, rings, height = 260, visible,
 }: DispatchMapProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
-  const layers = useRef<{ truck?: L.Marker; dest?: L.Marker; geo?: L.Circle; line?: L.Polyline; nav?: L.LayerGroup; roads?: L.GeoJSON }>({})
+  const layers = useRef<{ truck?: L.Marker; dest?: L.Marker; geo?: L.Circle; rings?: L.Circle[]; line?: L.Polyline; nav?: L.LayerGroup; roads?: L.GeoJSON }>({})
   const fittedKey = useRef<string>('')
 
   useEffect(() => {
@@ -45,7 +53,10 @@ function DispatchMap({
       dragging: false, touchZoom: false, scrollWheelZoom: false, doubleClickZoom: false,
       boxZoom: false, keyboard: false,
     })
-    L.tileLayer(ESRI, { maxZoom: 19 }).addTo(map)
+    // No global satellite basemap — this Leaflet path is only the WebGL fallback;
+    // it shows the haul roads / route / markers on a dark backdrop (the primary
+    // MapLibre NavMap drapes our own site ortho imagery). Matches the cab look.
+    map.getContainer().style.background = '#0a0e14'
     mapRef.current = map
     const t = setTimeout(() => map.invalidateSize(), 250)
     return () => { clearTimeout(t); map.remove(); mapRef.current = null; layers.current = {} }
@@ -113,13 +124,35 @@ function DispatchMap({
       const dicon = L.divIcon({ html: dhtml, className: '', iconSize: [16, 16], iconAnchor: [8, 8] })
       if (ls.dest) ls.dest.setLatLng([dest.lat, dest.lng]).setIcon(dicon)
       else ls.dest = L.marker([dest.lat, dest.lng], { icon: dicon }).addTo(map)
-      if (geofenceM && geofenceM > 0) {
-        if (ls.geo) ls.geo.setLatLng([dest.lat, dest.lng]).setRadius(geofenceM).setStyle({ color: destColor, fillColor: destColor })
-        else ls.geo = L.circle([dest.lat, dest.lng], { radius: geofenceM, color: destColor, weight: 2, fillColor: destColor, fillOpacity: 0.12 }).addTo(map)
-      } else if (ls.geo) { ls.geo.remove(); ls.geo = undefined }
+
+      // MOVING geofence rings (Discovery/Waiting/Loading) — colour-coded circles
+      // that follow the shovel. When provided they REPLACE the single geofence.
+      if (rings && rings.length) {
+        if (ls.geo) { ls.geo.remove(); ls.geo = undefined }
+        // reconcile circle layers with the ring list (reuse to avoid flicker)
+        const prev = ls.rings || []
+        rings.forEach((r, i) => {
+          const opts: L.CircleMarkerOptions = {
+            radius: r.radiusM, color: r.color, weight: 2, opacity: 0.9,
+            fillColor: r.color, fillOpacity: 0.06, dashArray: r.dashed ? '6 6' : undefined,
+          }
+          if (prev[i]) prev[i].setLatLng([dest.lat, dest.lng]).setRadius(r.radiusM).setStyle(opts)
+          else prev[i] = L.circle([dest.lat, dest.lng], { ...opts, radius: r.radiusM }).addTo(map)
+        })
+        // drop any extra circles from a previous longer ring list
+        for (let i = rings.length; i < prev.length; i++) prev[i].remove()
+        ls.rings = prev.slice(0, rings.length)
+      } else {
+        if (ls.rings) { ls.rings.forEach((c) => c.remove()); ls.rings = undefined }
+        if (geofenceM && geofenceM > 0) {
+          if (ls.geo) ls.geo.setLatLng([dest.lat, dest.lng]).setRadius(geofenceM).setStyle({ color: destColor, fillColor: destColor })
+          else ls.geo = L.circle([dest.lat, dest.lng], { radius: geofenceM, color: destColor, weight: 2, fillColor: destColor, fillOpacity: 0.12 }).addTo(map)
+        } else if (ls.geo) { ls.geo.remove(); ls.geo = undefined }
+      }
     } else {
       if (ls.dest) { ls.dest.remove(); ls.dest = undefined }
       if (ls.geo) { ls.geo.remove(); ls.geo = undefined }
+      if (ls.rings) { ls.rings.forEach((c) => c.remove()); ls.rings = undefined }
     }
 
     // straight fallback line only when there's no road route
@@ -143,7 +176,7 @@ function DispatchMap({
         else if (truck) map.setView([truck.lat, truck.lng], 15)
       }
     }
-  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, geofenceM, lane, destKind, stateColor, route])
+  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, geofenceM, lane, destKind, stateColor, route, rings])
 
   return (
     <div
