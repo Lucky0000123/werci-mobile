@@ -1,6 +1,6 @@
 // Excavator operator OUI — prototype ExcavatorOuiPanel layout for the in-cab APK.
 // Single screen, no page scroll: header · queue/loading (left) · FULL + plan (right).
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../services/api'
 import { useDispatchT } from '../services/dispatchI18n'
 
@@ -46,6 +46,7 @@ type OpExcavator = {
   target_trips?: number | null
   target_tonnes?: number | null
   planned_truck_count?: number | null
+  operator_loads_today?: number | null
 } | null
 
 type OpView = {
@@ -59,7 +60,7 @@ type ManualStatus = 'operating' | 'delay' | 'standby' | 'breakdown' | 'maintenan
 
 const EXC_STYLE: Record<string, { color: string; label: string }> = {
   loading: { color: '#FF4FB8', label: 'Loading' },
-  waiting: { color: '#FFE600', label: 'Ready / Operating' },
+  waiting: { color: '#FFE600', label: 'Waiting' },
   idle: { color: '#94A3B8', label: 'Standby' },
   delay: { color: '#F97316', label: 'Delay' },
   down: { color: '#EF4444', label: 'Down' },
@@ -91,6 +92,9 @@ function stateRank(s?: string) {
   if (s === 'waiting') return 2
   return 3
 }
+
+// Truck states the EXCAVATOR cares about — at or approaching its bucket.
+const AT_BUCKET_STATES = ['waiting', 'spot', 'loading']
 
 function clock(sec?: number | null) {
   if (sec == null) return '—'
@@ -200,18 +204,23 @@ export default function ExcavatorOuiPanel({
     return () => { alive = false }
   }, [excavatorNo])
 
+  // The excavator only cares about trucks AT or APPROACHING its bucket:
+  //   waiting / spot (queue, spotting) + loading (under the bucket).
+  // Once a truck departs (fullTravel1 → dump → empty legs) it's on the haul
+  // cycle and is NOT the excavator's concern — it vanishes from this screen
+  // until it returns to the queue. (Pre-arrival emptyTravel2 trucks are still
+  // inbound and not yet at the bucket, so they're excluded too.)
   const trucks = useMemo(() => (
-    (view?.trucks || []).slice().sort((a, b) =>
-      (stateRank(a.state) - stateRank(b.state)) || ((a.distance_m ?? 1e9) - (b.distance_m ?? 1e9)))
+    (view?.trucks || [])
+      .filter((t) => AT_BUCKET_STATES.includes(t.state || ''))
+      .slice().sort((a, b) =>
+        (stateRank(a.state) - stateRank(b.state)) || ((a.distance_m ?? 1e9) - (b.distance_m ?? 1e9)))
   ), [view?.trucks])
 
   const loadingTruck = trucks.find((t) => t.state === 'loading') || null
   const queue = trucks.filter((t) => t.state !== 'loading')
   const nextNo = view?.excavator?.next_truck_no
-  const nextTruck = queue.find((t) => t.truck_no === nextNo) || queue[0] || null
   const planId = view?.excavator?.plan_id
-  const lz = view?.zones?.loading_m ?? view?.excavator?.loading_zone_m
-  const wz = view?.zones?.waiting_m ?? view?.excavator?.waiting_zone_m
   const excSt = view?.excavator?.exc_status
   const excStyle = excSt ? EXC_STYLE[excSt] : undefined
 
@@ -223,14 +232,31 @@ export default function ExcavatorOuiPanel({
     ? dt('ms_' + manual!.status)
     : (view?.excavator?.exc_status_label || excStyle?.label || excSt || '—')
 
+  // Loading timer — runs from First Bucket. Anchor the server's time_in_state_s
+  // to a local wall-clock baseline so the counter ticks every second smoothly
+  // (instead of jumping on the 2s poll). Re-anchors whenever the loading truck or
+  // its server-reported elapsed changes.
+  const loadAnchor = useRef<{ truck: string; baseSec: number; at: number } | null>(null)
+  if (loadingTruck) {
+    const srvSec = loadingTruck.time_in_state_s ?? 0
+    const a = loadAnchor.current
+    if (!a || a.truck !== loadingTruck.truck_no || Math.abs((a.baseSec) - srvSec) > 2.5) {
+      loadAnchor.current = { truck: loadingTruck.truck_no, baseSec: srvSec, at: Date.now() }
+    }
+  } else {
+    loadAnchor.current = null
+  }
+
   useEffect(() => {
     if (!loadingTruck) return
     const id = setInterval(() => setTick((n) => n + 1), 1000)
     return () => clearInterval(id)
   }, [loadingTruck?.truck_no])
 
-  const loadingSec = loadingTruck?.time_in_state_s ?? null
   void tick
+  const loadingSec = loadingTruck && loadAnchor.current
+    ? loadAnchor.current.baseSec + Math.floor((Date.now() - loadAnchor.current.at) / 1000)
+    : null
 
   async function full() {
     if (!planId || !loadingTruck) return
@@ -293,23 +319,29 @@ export default function ExcavatorOuiPanel({
 
   return (
     <div style={shell}>
-      {/* header */}
+      {/* header — compact: small unit no + operator, slim status pill */}
       <header style={{
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        padding: '12px 14px', borderBottom: `1px solid ${P.line}`, background: '#101010', flexShrink: 0,
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '7px 12px', borderBottom: `1px solid ${P.line}`, background: '#101010', flexShrink: 0,
       }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.75rem', fontWeight: 900, color: P.ink, letterSpacing: '-0.02em' }}>
+        <div style={{ minWidth: 0, flex: 1, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.15rem', fontWeight: 900, color: P.ink, letterSpacing: '-0.02em' }}>
             {excavatorNo}
-          </div>
-          <div style={{ color: P.sub, fontSize: '0.78rem', fontWeight: 600 }}>
-            {operatorName || dt('operator')} · {dt('excavator')}
-            {lz != null && wz != null ? ` · ${lz}/${wz} m` : ''}
-          </div>
+          </span>
+          <span style={{ color: P.sub, fontSize: '0.7rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {operatorName || dt('operator')}
+          </span>
+        </div>
+        {/* Loaded-today — this OPERATOR's daily total across all their logins. */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1, marginRight: 4 }}>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.15rem', fontWeight: 900, color: P.loading }}>
+            {view?.excavator?.operator_loads_today ?? 0}
+          </span>
+          <span style={{ color: P.sub, fontSize: '0.5rem', fontWeight: 800, letterSpacing: '0.06em' }}>{dt('loaded_today').toUpperCase()}</span>
         </div>
         <div style={{
-          padding: '8px 14px', borderRadius: 12, fontWeight: 900, fontSize: '0.95rem',
-          textTransform: 'uppercase', color: P.ink,
+          padding: '4px 11px', borderRadius: 999, fontWeight: 900, fontSize: '0.72rem',
+          textTransform: 'uppercase', color: P.ink, whiteSpace: 'nowrap',
           border: `1px solid ${headColor}88`, background: `${headColor}33`,
         }}>
           {headLabel}
@@ -340,64 +372,45 @@ export default function ExcavatorOuiPanel({
 
           {!nonOp && view?.has_plan && (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, flexShrink: 0 }}>
-                <InfoTile
-                  label={dt('current_loading')}
-                  value={loadingTruck ? fmtTruck(loadingTruck.truck_no) : dt('no_truck_loading')}
-                  emphasis
-                  tone={loadingTruck ? P.loading : P.ink}
-                />
-                <InfoTile label={dt('next')} value={nextTruck ? fmtTruck(nextTruck.truck_no) : '—'} emphasis />
-                <InfoTile label={dt('queue')} value={queue.length} emphasis tone={P.accent} />
-              </div>
-
+              {/* NOW LOADING — one sleek strip: the truck currently under the
+                  bucket + its live load timer. Empty = waiting for First Bucket. */}
               <div style={{
-                ...panel, padding: 12, flexShrink: 0,
-                border: `1px solid ${P.loading}55`, background: `${P.loading}14`,
+                ...panel, padding: '10px 12px', flexShrink: 0,
+                border: `1px solid ${loadingTruck ? P.loading : P.line}`,
+                background: loadingTruck ? `${P.loading}16` : P.panel2,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
               }}>
-                <div style={{ color: P.loading, fontWeight: 900, fontSize: '0.62rem', letterSpacing: '0.1em', marginBottom: 8 }}>
-                  {dt('current_loading').toUpperCase()}
-                </div>
-                {loadingTruck ? (
-                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
-                    <div>
-                      <div style={{ color: P.sub, fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.08em' }}>{dt('truck')}</div>
-                      <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '2.6rem', fontWeight: 900, lineHeight: 1, color: P.ink }}>
-                        {fmtTruck(loadingTruck.truck_no)}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ color: P.sub, fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.08em' }}>{dt('loading_cap')}</div>
-                      <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '2.6rem', fontWeight: 900, lineHeight: 1, color: P.ink }}>
-                        {clock(loadingSec)}
-                      </div>
-                    </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: loadingTruck ? P.loading : P.sub, fontSize: '0.56rem', fontWeight: 900, letterSpacing: '0.1em' }}>
+                    {dt('now_loading').toUpperCase()}
                   </div>
-                ) : (
-                  <div style={{ color: P.ink, fontWeight: 800, fontSize: '1.05rem' }}>⏳ {dt('waiting_first_bucket')}</div>
+                  {loadingTruck ? (
+                    <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.7rem', fontWeight: 900, lineHeight: 1.05, color: P.ink }}>
+                      {fmtTruck(loadingTruck.truck_no)}
+                    </div>
+                  ) : (
+                    <div style={{ color: P.ink, fontWeight: 800, fontSize: '0.92rem', marginTop: 2 }}>⏳ {dt('waiting_first_bucket')}</div>
+                  )}
+                </div>
+                {loadingTruck && (
+                  <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.7rem', fontWeight: 900, color: P.loading, lineHeight: 1 }}>
+                    {clock(loadingSec)}
+                  </div>
                 )}
               </div>
 
-              <div style={{ ...panel, flex: 1, minHeight: 0, padding: 12, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
-                  <div style={{ color: P.ink, fontWeight: 900, fontSize: '0.72rem', letterSpacing: '0.06em' }}>{dt('queue').toUpperCase()}</div>
-                  {nextNo && (
-                    <span style={{
-                      padding: '3px 8px', borderRadius: 8, fontSize: '0.68rem', fontWeight: 800,
-                      border: `1px solid ${P.waiting}66`, background: `${P.waiting}18`, color: P.waiting,
-                    }}>
-                      {dt('next')}: {fmtTruck(nextNo)}
-                    </span>
-                  )}
+              {/* QUEUE — just truck numbers, tap to choose who loads next. The
+                  longest-waiting is highlighted by default; ★ = operator override. */}
+              <div style={{ ...panel, flex: 1, minHeight: 0, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
+                  <span style={{ color: P.ink, fontWeight: 900, fontSize: '0.66rem', letterSpacing: '0.08em' }}>
+                    {dt('queue').toUpperCase()} · {queue.length}
+                  </span>
+                  <span style={{ color: P.muted, fontSize: '0.58rem', fontWeight: 600 }}>{dt('tap_to_load_next')}</span>
                 </div>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                  {queue.length === 0 && <div style={{ color: P.muted, fontSize: '0.84rem' }}>{dt('no_trucks_feed')}</div>}
-                  {queue.length > 0 && (
-                    <div style={{ color: P.muted, fontSize: '0.62rem', fontWeight: 700, marginBottom: 6 }}>
-                      {dt('tap_to_load_next')}
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 6 }}>
+                  {queue.length === 0 && <div style={{ color: P.muted, fontSize: '0.8rem' }}>{dt('no_trucks_feed')}</div>}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(78px, 1fr))', gap: 6 }}>
                     {queue.map((t) => {
                       const isNext = t.truck_no === nextNo
                       const isOverride = isNext && !!view?.excavator?.next_is_override
@@ -406,26 +419,21 @@ export default function ExcavatorOuiPanel({
                         <button key={t.truck_no} type="button"
                           onClick={() => tappable && chooseNext(t.truck_no)}
                           disabled={!tappable || nextBusy}
+                          title={fmtMin(t.time_in_state_s)}
                           style={{
-                            ...panel,
-                            textAlign: 'left', cursor: tappable ? 'pointer' : 'default',
-                            padding: '8px 10px',
+                            position: 'relative',
+                            textAlign: 'center', cursor: tappable ? 'pointer' : 'default',
+                            padding: '9px 6px', borderRadius: 10,
+                            fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '1rem', color: P.ink,
                             border: isNext ? `2px solid ${P.waiting}` : `1px solid ${P.line}`,
                             background: isNext ? `${P.waiting}1e` : P.panel2,
                           }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-                            <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '1.05rem', color: P.ink }}>
-                              {fmtTruck(t.truck_no)}
+                          {fmtTruck(t.truck_no)}
+                          {isNext && (
+                            <span style={{ position: 'absolute', top: 2, right: 5, fontSize: '0.5rem', fontWeight: 900, color: P.waiting }}>
+                              {isOverride ? '★' : '▸'}
                             </span>
-                            {isNext && (
-                              <span style={{ fontSize: '0.54rem', fontWeight: 900, color: P.waiting, letterSpacing: '0.04em' }}>
-                                {isOverride ? '★ ' + dt('next').toUpperCase() : dt('next').toUpperCase()}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ color: P.muted, fontSize: '0.72rem', fontWeight: 700, marginTop: 2 }}>
-                            {fmtMin(t.time_in_state_s)}
-                          </div>
+                          )}
                         </button>
                       )
                     })}
@@ -452,46 +460,45 @@ export default function ExcavatorOuiPanel({
             </button>
           ) : view?.has_plan ? (
             <>
-              <div style={{ ...panel, padding: 14, border: `1px solid ${P.accent}55`, background: '#101820', flexShrink: 0 }}>
-                <div style={{ color: P.accent, fontWeight: 900, fontSize: '0.62rem', letterSpacing: '0.1em', marginBottom: 8 }}>
-                  PRIMARY ACTION
-                </div>
-                <button
-                  type="button"
-                  onClick={full}
-                  disabled={acting || !loadingTruck}
-                  style={{
-                    width: '100%', minHeight: 120, borderRadius: 16,
-                    border: `1px solid ${P.accent}aa`, background: acting || !loadingTruck ? '#3a3a3a' : P.accent,
-                    color: acting || !loadingTruck ? P.muted : '#232323',
-                    fontWeight: 900, fontSize: '2.4rem', letterSpacing: '0.04em', cursor: acting || !loadingTruck ? 'not-allowed' : 'pointer',
-                    boxShadow: loadingTruck ? `0 0 24px ${P.accent}44` : 'none',
-                  }}
-                >
-                  {acting ? dt('recording') : (loadingTruck ? dt('full_kickout') : dt('full'))}
-                </button>
-                <div style={{ marginTop: 8, fontSize: '0.76rem', fontWeight: 700, color: P.sub }}>
-                  {loadingTruck ? `${dt('complete_load')} · ${fmtTruck(loadingTruck.truck_no)}` : dt('no_truck_loading')}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={full}
+                disabled={acting || !loadingTruck}
+                style={{
+                  width: '100%', minHeight: 76, borderRadius: 14, flexShrink: 0,
+                  border: `1px solid ${P.accent}aa`, background: acting || !loadingTruck ? '#2c2c2c' : P.accent,
+                  color: acting || !loadingTruck ? P.muted : '#1a1a1a',
+                  fontWeight: 900, fontSize: '1.5rem', letterSpacing: '0.02em',
+                  cursor: acting || !loadingTruck ? 'not-allowed' : 'pointer',
+                  boxShadow: loadingTruck ? `0 0 18px ${P.accent}40` : 'none',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                }}
+              >
+                <span>{acting ? dt('recording') : (loadingTruck ? dt('full_kickout') : dt('full'))}</span>
+                {loadingTruck && !acting && (
+                  <span style={{ fontSize: '0.62rem', fontWeight: 700, opacity: 0.85 }}>
+                    {fmtTruck(loadingTruck.truck_no)}
+                  </span>
+                )}
+              </button>
               {msg && (
-                <div style={{ fontSize: '0.82rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', flexShrink: 0 }}>{msg}</div>
+                <div style={{ fontSize: '0.78rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', flexShrink: 0 }}>{msg}</div>
               )}
             </>
           ) : null}
 
           {view?.excavator && view.has_plan && (
-            <div style={{ ...panel, padding: 12, flex: '1 1 0', minHeight: 0, overflowY: 'auto' }}>
-              <div style={{ color: P.ink, fontWeight: 900, fontSize: '0.72rem', letterSpacing: '0.06em', marginBottom: 8 }}>
+            <div style={{ ...panel, padding: '10px 12px', flex: '1 1 0', minHeight: 0 }}>
+              <div style={{ color: P.ink, fontWeight: 900, fontSize: '0.66rem', letterSpacing: '0.08em', marginBottom: 8 }}>
                 {dt('plan_details').toUpperCase()}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <InfoTile label={dt('plan')} value={planId ? `#${planId}` : '—'} />
-                <InfoTile label={dt('shift')} value={view.excavator.shift || '—'} />
+                <InfoTile label={dt('shift')} value={`${view.excavator.shift || '?'} · ${shiftDate}`} />
                 <InfoTile label={dt('loading_loc')} value={view.excavator.loading_location_name || '—'} />
                 <InfoTile label={dt('dump_loc')} value={view.excavator.dump_location_name || '—'} />
-                <InfoTile label="Shift / Date" value={`${view.excavator.shift || '?'} · ${shiftDate}`} />
-                <InfoTile label="Planned trucks" value={view.excavator.planned_truck_count ?? '—'} />
+                <InfoTile label="Trips" value={view.excavator.target_trips ?? '—'} />
+                <InfoTile label="Trucks" value={view.excavator.planned_truck_count ?? '—'} />
               </div>
             </div>
           )}

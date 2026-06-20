@@ -2,6 +2,7 @@
 import { motion } from 'framer-motion'
 import prismLogo from '../assets/Logo1_splash.png'
 import { authService, type AuthenticatedUser } from '../services/auth'
+import { useI18n, type Language } from '../services/i18n-context'
 import {
   checkBiometricAvailability,
   isBiometricEnabled,
@@ -30,7 +31,14 @@ const itemVariants = {
   }
 } as const
 
+const LOGIN_LANGS: { lang: Language; flag: string; label: string }[] = [
+  { lang: 'id', flag: '🇮🇩', label: 'Indonesia' },
+  { lang: 'en', flag: '🇬🇧', label: 'English' },
+  { lang: 'zh', flag: '🇨🇳', label: '中文' },
+]
+
 export default function LoginPage({ onLoginSuccess, onBack }: LoginPageProps) {
+  const { language, setLanguage } = useI18n()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -126,6 +134,23 @@ export default function LoginPage({ onLoginSuccess, onBack }: LoginPageProps) {
               whileHover={{ scale: 1.05 }}
               transition={{ type: 'spring', stiffness: 400, damping: 17 }}
             />
+          </motion.div>
+
+          {/* Language selector — pick the language to read this screen in. */}
+          <motion.div variants={itemVariants} style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: '18px' }}>
+            {LOGIN_LANGS.map(({ lang, flag, label }) => {
+              const active = language === lang
+              return (
+                <button key={lang} type="button" onClick={() => setLanguage(lang)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                                 padding: '7px 12px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 700,
+                                 border: `1px solid ${active ? '#FC4100' : 'rgba(255,255,255,0.12)'}`,
+                                 background: active ? 'rgba(252,65,0,0.16)' : 'rgba(255,255,255,0.03)',
+                                 color: active ? '#fda07a' : '#94a3b8' }}>
+                  <span style={{ fontSize: '0.95rem' }}>{flag}</span><span>{label}</span>
+                </button>
+              )
+            })}
           </motion.div>
 
           {/* Title */}

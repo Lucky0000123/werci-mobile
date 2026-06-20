@@ -374,7 +374,8 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     const isExc = connection.unit_type === 'excavator'
     return (
       <div style={{ height: '100dvh', boxSizing: 'border-box', background: D.bg,
-                    padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
+                    padding: 8, paddingBottom: 'calc(8px + env(safe-area-inset-bottom, 0px))',
+                    display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
         {/* compact top bar — logo, name, warnings, switch/end (always shown) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             <img src={prismLogo} alt="PRISM" style={{ height: 28, width: 'auto', flexShrink: 0 }} />
@@ -393,7 +394,44 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
                 ))}
               </div>
             )}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexShrink: 0 }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              {/* Language switcher — must be reachable from EVERY in-cab screen
+                  (excavator + truck OUI both render under this top bar). */}
+              <div style={{ position: 'relative' }}>
+                <button type="button" onClick={() => setShowLangMenu((v) => !v)} aria-label={dt('language')}
+                        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px',
+                                 fontSize: '0.74rem', fontWeight: 800, color: D.sub2,
+                                 background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
+                  <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>
+                    {language === 'id' ? '🇮🇩' : language === 'zh' ? '🇨🇳' : '🇬🇧'}
+                  </span>
+                  <span>{language.toUpperCase()}</span>
+                </button>
+                {showLangMenu && (
+                  <>
+                    <div onClick={() => setShowLangMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+                    <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 41,
+                                  background: F.panelHi, border: `1px solid ${F.line2}`, borderRadius: 12,
+                                  boxShadow: '0 18px 40px rgba(0,0,0,0.6)', overflow: 'hidden', minWidth: 170 }}>
+                      {[
+                        { lang: 'id' as Language, flag: '🇮🇩', label: 'Bahasa Indonesia' },
+                        { lang: 'en' as Language, flag: '🇬🇧', label: 'English' },
+                        { lang: 'zh' as Language, flag: '🇨🇳', label: '中文' },
+                      ].map(({ lang, flag, label }) => (
+                        <button key={lang} onClick={() => { setLanguage(lang); setShowLangMenu(false) }}
+                                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9,
+                                         padding: '11px 14px', fontSize: '0.86rem', fontWeight: 600, textAlign: 'left',
+                                         cursor: 'pointer', border: 'none', borderBottom: `1px solid ${F.line}`,
+                                         background: language === lang ? 'rgba(245,165,36,0.15)' : 'transparent',
+                                         color: language === lang ? F.gold : F.sub2 }}>
+                          <span>{flag}</span><span>{label}</span>
+                          {language === lang && <span style={{ marginLeft: 'auto', color: F.gold }}>✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <button onClick={reset}
                       style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: D.sub2, background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
                 {dt('different_emp')}
@@ -681,6 +719,7 @@ type OpTruck = {
   state?: string; state_label?: string; state_color?: string; time_in_state_s?: number | null
   lat?: number | null; lng?: number | null
   reporting?: boolean; departed?: boolean; last_zone?: string | null; zone_changed?: string | null
+  driver_trips_today?: number | null
 }
 type OpExcavator = {
   excavator_no?: string; plan_id?: number; shift?: string; plan_date?: string | null
@@ -1143,7 +1182,6 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
           {viewMode !== 'status' && (
             <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 4, columnGap: 16, padding: '2px 4px' }}>
               <StateLine label={dt('current_state')} value={nonOp ? dt('ms_' + manual!.status) : curLabel} color={nonOp ? (manualMeta(manual!.status)?.color || D.sub) : curColor} />
-              <StateLine label={dt('next_state')} value={nextLabel || '—'} color={nextColor} />
               <StateLine label={dt('next_location')} value={nextLocName} color={D.accent} />
             </div>
           )}
@@ -1153,13 +1191,14 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
             Always visible: STATUS only swaps the LEFT map box for the wheel. */}
         <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0 }}>
           {!nonOp && (
-            <div style={{ ...panel, flexShrink: 0, padding: 12, border: `1px solid ${D.accent}3A`,
-                          background: '#101820', boxShadow: `0 0 0 1px ${D.accent}14` }}>
-              {/* OPERATOR ACTION header + the per-state guidance (prototype) */}
+            <div style={{ ...panel, flexShrink: 0, padding: 12, border: `1px solid ${curColor}55`,
+                          background: '#101820', boxShadow: `0 0 0 1px ${curColor}1f` }}>
+              {/* OPERATOR ACTION header + the per-state guidance (prototype).
+                  Accent follows the CURRENT cycle-status colour. */}
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                <span style={{ color: D.accent, fontSize: '1rem', lineHeight: 1.1 }}>▸</span>
+                <span style={{ color: curColor, fontSize: '1rem', lineHeight: 1.1 }}>▸</span>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: D.accent, fontWeight: 800, fontSize: '0.62rem', letterSpacing: '0.1em' }}>{dt('operator_action')}</div>
+                  <div style={{ color: curColor, fontWeight: 800, fontSize: '0.62rem', letterSpacing: '0.1em' }}>{dt('operator_action')}</div>
                   <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.25, marginTop: 2 }}>{reqHint}</div>
                 </div>
               </div>
@@ -1212,24 +1251,23 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
           )}
 
           <div style={{ flexShrink: 0 }}>
-            <ManualStatusControl unitNo={truckNo} unitType="dump_truck" employeeId={employeeId}
+            <ManualStatusControl unitNo={truckNo} unitType="dump_truck" employeeId={employeeId} hideTrigger
                                  current={manual} open={statusOpen} onOpenChange={setStatusOpen}
                                  onChange={(status, reason) => setManual({ status, reason })} />
           </div>
 
-          {/* ASSIGNMENT — fills remaining space; compact grid fits in view */}
+          {/* ASSIGNMENT — fills remaining space; grid shrinks to fit, never clips */}
           <div style={{ ...panel, flex: '1 1 0', minHeight: 0, overflow: 'hidden', padding: 8, display: 'flex', flexDirection: 'column' }}>
             <SectionLabel icon="📍" text="ASSIGNMENT" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 5 }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gridAutoRows: 'minmax(0, 1fr)', gap: 6, marginTop: 7 }}>
               <MiniTile k="Truck ID" v={truck?.truck_no || truckNo} />
               <MiniTile k="Driver" v={truck?.driver_name || '—'} />
               <MiniTile k="Assigned Excavator" v={excavatorNo || '—'} />
-              <MiniTile k="Connection" v={truck?.connected ? (truck?.live ? 'Connected · Live' : 'Connected · GPS offline') : 'Not connected'} />
+              <MiniTile k="Trips Today" v={String(truck?.driver_trips_today ?? 0)} />
               <MiniTile k="Loading Source" v={loadingLoc || '—'} />
               <MiniTile k="Dump Location" v={dumpLoc || '—'} />
-              <MiniTile k="Plan ID" v={planId ? `#${planId}` : '—'} />
               <MiniTile k="Shift / Date" v={shiftDate} />
-              <div style={{ gridColumn: '1 / -1' }}><MiniTile k="Next Location" v={nextLocName} /></div>
+              <MiniTile k="Next Location" v={nextLocName} />
             </div>
           </div>
         </div>
@@ -1242,9 +1280,11 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
 // Compact assignment tile (denser than Tile) so the grid fits with no scroll.
 const MiniTile = memo(function MiniTile({ k, v }: { k: string; v: string }) {
   return (
-    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 7, padding: '3px 7px' }}>
-      <div style={{ color: D.sub, fontSize: '0.5rem', letterSpacing: '0.02em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
-      <div style={{ color: D.ink, fontWeight: 700, fontSize: '0.76rem', marginTop: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+    <div style={{ background: D.panel2, border: `1px solid ${D.line}`, borderRadius: 9,
+                  padding: '5px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                  minHeight: 30, minWidth: 0, overflow: 'hidden' }}>
+      <div style={{ color: D.sub, fontSize: '0.52rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</div>
+      <div style={{ color: D.ink, fontWeight: 800, fontSize: '0.82rem', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
     </div>
   )
 })
@@ -1276,11 +1316,11 @@ const secBtn: React.CSSProperties = {
 // ════════════════════════════════════════════════════════════════════════
 //  MANUAL STATUS CONTROL (compact trigger + modal — saves vertical space)
 // ════════════════════════════════════════════════════════════════════════
-function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, open: openProp, onOpenChange }:
+function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, open: openProp, onOpenChange, hideTrigger }:
   { unitNo: string; unitType: string; employeeId: string
     current: { status: string; reason?: string } | null
     onChange: (status: string, reason?: string) => void
-    open?: boolean; onOpenChange?: (o: boolean) => void }) {
+    open?: boolean; onOpenChange?: (o: boolean) => void; hideTrigger?: boolean }) {
   const dt = useDispatchT()
   const [openLocal, setOpenLocal] = useState(false)
   const open = openProp !== undefined ? openProp : openLocal
@@ -1308,6 +1348,7 @@ function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, 
 
   return (
     <>
+      {!hideTrigger && (
       <button onClick={() => setOpen(true)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                        background: D.panel, border: `1px solid ${cur === 'operating' ? D.line : (curMeta?.color || D.line)}`,
@@ -1318,45 +1359,74 @@ function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, 
           <span style={{ color: D.accent, fontSize: '0.72rem', fontWeight: 800 }}>{dt('change_status')} ›</span>
         </span>
       </button>
+      )}
 
       {open && (
         <div onClick={() => { setOpen(false); setPick(null) }}
-             style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(2,6,12,0.72)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+             style={{ position: 'fixed', inset: 0, zIndex: 4000, background: 'rgba(2,6,12,0.78)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+                      backdropFilter: 'blur(2px)' }}>
           <div onClick={(e) => e.stopPropagation()}
-               style={{ width: '100%', maxWidth: 460, background: D.panel, border: `1px solid ${D.line2}`,
-                        borderRadius: 18, padding: 18, boxShadow: '0 24px 60px rgba(0,0,0,0.55)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ color: D.ink, fontWeight: 800, fontSize: '1rem' }}>{dt('machine_availability')}</div>
+               style={{ width: '100%', maxWidth: 480, background: D.panel, border: `1px solid ${D.line2}`,
+                        borderRadius: 20, padding: 20, boxShadow: '0 24px 70px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div style={{ color: D.ink, fontWeight: 900, fontSize: '1.05rem' }}>{dt('machine_availability')}</div>
               <span style={chip(curMeta?.color || '#16A34A')}>{dt('ms_' + cur).toUpperCase()}</span>
             </div>
+            <div style={{ color: D.sub, fontSize: '0.72rem', marginBottom: 16 }}>{unitNo}</div>
 
             {cur !== 'operating' && (
-              <button onClick={() => send('operating')} disabled={busy} style={{ ...darkBtn('#16A34A'), marginBottom: 12 }}>
+              <button onClick={() => send('operating')} disabled={busy}
+                      style={{ width: '100%', minHeight: 54, borderRadius: 14, marginBottom: 14, cursor: 'pointer',
+                               border: '1px solid #16A34A', background: '#16A34A', color: '#fff',
+                               fontWeight: 900, fontSize: '0.98rem', display: 'flex', alignItems: 'center',
+                               justifyContent: 'center', gap: 8 }}>
+                <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#fff' }} />
                 {busy ? '…' : dt('return_operating')}
               </button>
             )}
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {MANUAL_STATUSES.filter((m) => m.value !== 'operating').map((m) => (
-                <button key={m.value} onClick={() => setPick(m.value)}
-                        style={{ ...tag(m.color, pick === m.value), flex: '1 1 30%', minHeight: 48 }}>{dt('ms_' + m.value)}</button>
-              ))}
+            <div style={{ color: D.sub, fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.08em', marginBottom: 8 }}>
+              {dt('select_status').toUpperCase()}
+            </div>
+            {/* Color-coded status cards — one per row, with a status dot. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {MANUAL_STATUSES.filter((m) => m.value !== 'operating').map((m) => {
+                const active = pick === m.value
+                return (
+                  <button key={m.value} onClick={() => setPick(m.value)}
+                          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+                                   minHeight: 50, padding: '0 14px', borderRadius: 13, textAlign: 'left',
+                                   border: `2px solid ${active ? m.color : D.line2}`,
+                                   background: active ? `${m.color}22` : D.panel2 }}>
+                    <span style={{ width: 13, height: 13, borderRadius: '50%', background: m.color, flexShrink: 0,
+                                   boxShadow: active ? `0 0 8px ${m.color}` : 'none' }} />
+                    <span style={{ color: D.ink, fontWeight: 800, fontSize: '0.96rem' }}>{dt('ms_' + m.value)}</span>
+                    {active && <span style={{ marginLeft: 'auto', color: m.color, fontWeight: 900 }}>✓</span>}
+                  </button>
+                )
+              })}
             </div>
 
             {pick && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ color: D.sub, fontSize: '0.72rem', marginBottom: 8 }}>{dt('reason')}</div>
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${D.line2}` }}>
+                <div style={{ color: D.sub, fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.08em', marginBottom: 8 }}>
+                  {dt('reason').toUpperCase()}
+                </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {(STATUS_REASONS[pick] || ['Other']).map((rsn) => (
                     <button key={rsn} onClick={() => send(pick, rsn)} disabled={busy}
-                            style={tag(manualMeta(pick)?.color || D.sub, false)}>{rsn}</button>
+                            style={{ padding: '10px 14px', borderRadius: 11, cursor: 'pointer', fontWeight: 800, fontSize: '0.84rem',
+                                     border: `1px solid ${manualMeta(pick)?.color || D.sub}66`,
+                                     background: `${manualMeta(pick)?.color || D.sub}14`, color: D.ink }}>
+                      {rsn}
+                    </button>
                   ))}
                 </div>
               </div>
             )}
 
-            <button onClick={() => { setOpen(false); setPick(null) }} style={{ ...ghostBtn, color: D.sub, marginTop: 14 }}>{dt('cancel')}</button>
+            <button onClick={() => { setOpen(false); setPick(null) }} style={{ ...ghostBtn, color: D.sub, marginTop: 16 }}>{dt('cancel')}</button>
           </div>
         </div>
       )}
@@ -1436,21 +1506,10 @@ function bigBtn(color: string, disabled: boolean): React.CSSProperties {
     boxShadow: disabled ? 'none' : `0 8px 22px ${color}44`,
   }
 }
-function darkBtn(color: string): React.CSSProperties {
-  return { width: '100%', padding: '12px', fontSize: '0.95rem', fontWeight: 800, color: inkOn(color),
-           background: color, border: 'none', borderRadius: 12, cursor: 'pointer' }
-}
 const ghostBtn: React.CSSProperties = {
   width: '100%', padding: '12px', fontSize: '0.9rem', fontWeight: 600, color: C.sub,
   background: 'transparent', border: 'none', marginTop: 4, cursor: 'pointer',
 }
 function chip(color: string): React.CSSProperties {
   return { fontSize: '0.72rem', fontWeight: 700, color, background: `${color}1F`, border: `1px solid ${color}55`, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }
-}
-function tag(color: string, active: boolean): React.CSSProperties {
-  return {
-    fontSize: '0.8rem', fontWeight: 700, color: active ? inkOn(color) : color,
-    background: active ? color : `${color}1A`, border: `1px solid ${color}66`,
-    padding: '9px 10px', borderRadius: 10, cursor: 'pointer', textAlign: 'center',
-  }
 }

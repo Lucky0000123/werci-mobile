@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import prismLogo from '../assets/Logo1_splash.png'
 import { useDispatchT } from '../services/dispatchI18n'
+import { useI18n, type Language } from '../services/i18n-context'
 
 // First screen (shown when there's no active session): choose how this device is
 // used. "User" → the normal username/password login → the full app. "FMS" →
@@ -12,8 +13,15 @@ interface ModePickerProps {
   fmsError?: boolean
 }
 
+const LANGS: { lang: Language; flag: string; label: string }[] = [
+  { lang: 'id', flag: '🇮🇩', label: 'Indonesia' },
+  { lang: 'en', flag: '🇬🇧', label: 'English' },
+  { lang: 'zh', flag: '🇨🇳', label: '中文' },
+]
+
 export default function ModePicker({ onPickUser, onPickFms, fmsAvailable, fmsError }: ModePickerProps) {
   const dt = useDispatchT()
+  const { language, setLanguage } = useI18n()
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: '#050a12' }}>
       <motion.div
@@ -22,6 +30,23 @@ export default function ModePicker({ onPickUser, onPickFms, fmsAvailable, fmsErr
         transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         style={{ width: '100%', maxWidth: '440px', background: 'rgba(12,18,28,0.96)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '24px', padding: '28px', boxShadow: '0 24px 60px rgba(0,0,0,0.38)' }}
       >
+        {/* Language selector — pick the language to read this screen in. */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 18 }}>
+          {LANGS.map(({ lang, flag, label }) => {
+            const active = language === lang
+            return (
+              <button key={lang} type="button" onClick={() => setLanguage(lang)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                               padding: '7px 12px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 700,
+                               border: `1px solid ${active ? '#2563EB' : 'rgba(255,255,255,0.12)'}`,
+                               background: active ? 'rgba(37,99,235,0.18)' : 'rgba(255,255,255,0.03)',
+                               color: active ? '#93c5fd' : '#94a3b8' }}>
+                <span style={{ fontSize: '0.95rem' }}>{flag}</span><span>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '18px' }}>
           <img src={prismLogo} alt="PRISM" style={{ width: '170px', height: '48px', objectFit: 'contain' }} />
         </div>

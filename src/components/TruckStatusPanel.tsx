@@ -79,10 +79,14 @@ const OVERLAY: Record<Segment, WedgeSpec> = {
   EMPTY_WEIGHBRIDGE: { startDeg: 295,   endDeg: 335.5, innerR: 21.2, outerR: 45.8 },
 }
 
-const ACTIVE_OVERLAY_COLOR = '#7EC8FF'
-const ACTIVE_OPACITY = 0.34
 // Centre-hub diameter as % of image (matches the wheel's white inner hole).
 const CENTER_PCT = 21.2 * 2 * 0.97
+
+// RESERVED stages — weighbridge + sampling are PLACEHOLDERS for a later phase
+// (no GPS locations yet). They're greyed out on the wheel so the active cycle
+// (Queue/Spot → Loading → Full Travel → Dumping → Empty Travel) reads cleanly
+// and these read as "coming later", never as a current stage.
+const RESERVED_SEGMENTS: Segment[] = ['FULL_WEIGHBRIDGE', 'SAMPLING', 'EMPTY_WEIGHBRIDGE']
 
 function polar(r: number, degFromTop: number) {
   const rad = ((degFromTop - 90) * Math.PI) / 180
@@ -132,6 +136,18 @@ function colorWithAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+// Pick black or white text for legibility ON a given fill colour (WCAG-ish
+// luminance). Light stages (yellow/white/light-green) get black; dark ones white.
+function onColor(hex: string): string {
+  const h = (hex || '').replace('#', '')
+  if (h.length < 6) return '#ffffff'
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return lum > 0.6 ? '#111827' : '#ffffff'
+}
+
 // ── main panel ─────────────────────────────────────────────────────────────
 function TruckStatusPanelImpl({ status, assignment }: Props) {
   const [imgOk, setImgOk] = useState(true)
@@ -157,7 +173,6 @@ function TruckStatusPanelImpl({ status, assignment }: Props) {
   const segment = stateToSegment(status.state)
   const stateColor = status.state_color || D.accent
   const curLabel = status.state_label || (segment ? SEGMENT_LABEL[segment] : status.state) || '—'
-  const nextLabel = status.next_label || status.next_state || '—'
   const nextLoc = assignment.next_location_name || '—'
 
   // Safe fallback: if the wheel art can't load, still show the current stage.
@@ -167,8 +182,7 @@ function TruckStatusPanelImpl({ status, assignment }: Props) {
         <div style={{ width: '100%', maxWidth: 360, background: D.panel, border: `1px solid ${stateColor}55`, borderRadius: 16, padding: 18, textAlign: 'center' }}>
           <div style={{ color: D.sub, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.1em' }}>CURRENT STATE</div>
           <div style={{ color: stateColor, fontSize: '1.7rem', fontWeight: 900, lineHeight: 1.1, marginTop: 4 }}>{curLabel.toUpperCase()}</div>
-          <div style={{ color: D.sub2, fontSize: '0.82rem', marginTop: 12 }}>Next: <b style={{ color: D.ink }}>{nextLabel.toUpperCase()}</b></div>
-          <div style={{ color: D.sub, fontSize: '0.78rem', marginTop: 2 }}>→ {nextLoc}</div>
+          <div style={{ color: D.sub, fontSize: '0.78rem', marginTop: 12 }}>→ {nextLoc}</div>
         </div>
       </div>
     )
@@ -185,29 +199,43 @@ function TruckStatusPanelImpl({ status, assignment }: Props) {
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
         />
 
-        {/* Active-stage highlight */}
+        {/* Reserved-stage veil — weighbridge + sampling are placeholders for a
+            later phase; grey them out so they read as inactive/coming-later. */}
+        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"
+             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} aria-hidden>
+          {RESERVED_SEGMENTS.map((seg) => (
+            <path key={seg} d={wedgePath(OVERLAY[seg])}
+                  fill="#9ca3af" fillOpacity={0.62}
+                  stroke="#6b7280" strokeWidth={0.5} strokeLinejoin="round" />
+          ))}
+        </svg>
+
+        {/* Active-stage highlight — uses the stage's OWN colour at high opacity
+            with a bright stroke so the current wedge stands out clearly. */}
         {segment && (
           <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"
                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} aria-hidden>
-            <path d={wedgePath(OVERLAY[segment])} fill={ACTIVE_OVERLAY_COLOR} fillOpacity={ACTIVE_OPACITY} />
+            <path d={wedgePath(OVERLAY[segment])}
+                  fill={colorWithAlpha(stateColor, 0.55)}
+                  stroke={stateColor} strokeWidth={0.9} strokeLinejoin="round" />
           </svg>
         )}
 
-        {/* Centre hub — sits inside the wheel's white hole */}
+        {/* Centre hub — filled with the CURRENT STAGE colour so the live status
+            reads at a glance; text auto-contrasts to the fill. */}
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
           <div style={{
             width: `${CENTER_PCT}%`, height: `${CENTER_PCT}%`, borderRadius: '50%',
-            background: colorWithAlpha(stateColor, 0.2), border: `1px solid ${colorWithAlpha(stateColor, 0.4)}`,
+            background: stateColor, border: `2px solid ${onColor(stateColor) === '#ffffff' ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)'}`,
+            boxShadow: `0 0 14px ${colorWithAlpha(stateColor, 0.55)}`,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             textAlign: 'center', padding: '5%', boxSizing: 'border-box', overflow: 'hidden',
           }}>
-            <div style={{ fontSize: '0.4rem', fontWeight: 900, letterSpacing: '0.12em', color: '#2563EB' }}>CURRENT STATE</div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 900, lineHeight: 1.05, marginTop: 1, textTransform: 'uppercase', color: '#111827' }}>{curLabel}</div>
-            <div style={{ width: '70%', height: 1, background: '#E5E7EB', margin: '4px 0' }} />
-            <div style={{ fontSize: '0.36rem', fontWeight: 900, letterSpacing: '0.1em', color: '#6B7280' }}>NEXT STATE</div>
-            <div style={{ fontSize: '0.48rem', fontWeight: 700, lineHeight: 1.05, color: '#374151', textTransform: 'uppercase' }}>{nextLabel}</div>
-            <div style={{ fontSize: '0.36rem', fontWeight: 900, letterSpacing: '0.1em', color: '#6B7280', marginTop: 3 }}>NEXT LOCATION</div>
-            <div style={{ fontSize: '0.54rem', fontWeight: 900, lineHeight: 1.05, color: '#111827', textTransform: 'uppercase' }}>{nextLoc}</div>
+            <div style={{ fontSize: '0.4rem', fontWeight: 900, letterSpacing: '0.12em', color: onColor(stateColor), opacity: 0.75 }}>CURRENT</div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 900, lineHeight: 1.0, marginTop: 1, textTransform: 'uppercase', color: onColor(stateColor) }}>{curLabel}</div>
+            <div style={{ width: '64%', height: 1, background: colorWithAlpha(onColor(stateColor), 0.3), margin: '4px 0' }} />
+            <div style={{ fontSize: '0.36rem', fontWeight: 900, letterSpacing: '0.1em', color: onColor(stateColor), opacity: 0.7 }}>→ LOCATION</div>
+            <div style={{ fontSize: '0.54rem', fontWeight: 900, lineHeight: 1.05, color: onColor(stateColor), textTransform: 'uppercase' }}>{nextLoc}</div>
           </div>
         </div>
       </div>

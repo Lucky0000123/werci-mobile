@@ -7,6 +7,58 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.41.0 — In-cab OUI fits one frame + language on every OUI screen. (1) The
+ *          in-cab top bar (shared by BOTH the excavator and truck OUI) now
+ *          carries the 🇮🇩/🇬🇧/🇨🇳 language switcher, so language is changeable
+ *          from every operator screen, not just sign-on. (2) Truck OUI no longer
+ *          clips the Assignment grid: the in-cab wrapper respects the bottom
+ *          safe-area inset (Android nav bar) and the Assignment tiles now shrink
+ *          to fit (gridAutoRows minmax(0,1fr) + denser MiniTile), so all 8 tiles
+ *          stay on one frame on the 1280×800 cab tablet. (3) Excavator "waiting"
+ *          state reads "Waiting" (was "Ready / Operating").
+ * 2.40.0 — Language selector on EVERY entry screen + Assignment polish. The
+ *          Mode-selection AND Login screens now carry a language selector
+ *          (Indonesia / English / 中文) — combined with the existing in-app
+ *          header + Dispatch switchers, the language can be changed on any
+ *          screen. The truck OUI Assignment grid is realigned into a clean,
+ *          equal-height 4×2 tile layout (uniform MiniTile sizing) — no more
+ *          mismatched/odd-row blocks.
+ * 2.39.0 — Truck OUI polish. (1) Operator-action box accent now follows the
+ *          CURRENT cycle-status colour. (2) Status change consolidated to one
+ *          "Request Status Change" button (removed the duplicate Machine
+ *          Availability box); the picker is redesigned — professional colour-
+ *          coded status cards (status dot + coloured border + ✓), cleaner reason
+ *          chips. (3) Assignment grid drops the Connection + Plan ID tiles.
+ * 2.38.0 — Excavator OUI only shows trucks AT its bucket (waiting / spot /
+ *          loading). A truck that departs after FULL·Kickout (full travel → dump
+ *          → empty legs) disappears from the excavator screen — the operator no
+ *          longer sees the DT's haul status (e.g. "Full Travel"); it reappears
+ *          only when it returns to the queue. Excavator flips loading → waiting
+ *          on FULL and back to loading on the next truck's First Bucket.
+ * 2.37.0 — Truck OUI: removed the "Next State" readout (it added noise) — the
+ *          wheel hub now shows CURRENT + → Location only, and the line under the
+ *          map drops Next State, keeping Current State + Next Location.
+ * 2.36.0 — Per-PERSON daily counters + wheel placeholders + smooth load timer.
+ *          (1) Excavator OUI header now shows the OPERATOR's "Loaded Today" total
+ *          and the Truck OUI shows the DRIVER's "Trips Today" — both keyed on the
+ *          person's employee_id, so they AGGREGATE across every login that day and
+ *          a different operator/driver on the same machine counts from 0 (the
+ *          prior person's total stays theirs). (2) The loading timer now ticks
+ *          smoothly every second from First Bucket (local-anchored to the server
+ *          elapsed). (3) Haul-cycle wheel greys out Full/Empty Weighbridge +
+ *          Sampling as RESERVED placeholders (no GPS yet) so the active cycle
+ *          reads cleanly.
+ * 2.35.0 — Truck Status wheel — clearer current-stage highlight. The active
+ *          wedge is now filled with the STAGE's OWN colour (high opacity + bright
+ *          stroke) instead of a faint static cyan, and the centre hub is filled
+ *          solid with the current-status colour (auto-contrast black/white text)
+ *          so the live haul stage reads at a glance on the in-cab tablet.
+ * 2.34.0 — Excavator OUI redesign — sleek single-frame, no scroll. Compact
+ *          header (small unit no + slim status pill), one "NOW LOADING" strip
+ *          (current truck + live load timer), queue shown as tap-to-select truck
+ *          number chips (longest-waiting ▸ highlighted, ★ = operator override),
+ *          smaller FULL · KICKOUT DT button, and a non-scrolling plan-details
+ *          grid for more breathing room. Loading timer runs from First Bucket.
  * 2.33.0 — Offline GPS trigger engine (the cab auto-tracks the haul cycle with
  *          no signal). When the truck loses signal, the in-cab driver screen now
  *          derives arrival/departure transitions from the DEVICE's own GPS
@@ -292,4 +344,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.33.0'
+export const APP_VERSION = '2.41.0'
