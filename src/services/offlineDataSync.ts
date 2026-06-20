@@ -34,6 +34,18 @@ function isRecoverableIdbError(err: unknown): boolean {
 // in one microtask burst and the progress bar appears frozen until the end.
 const yieldToBrowser = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 
+// ── Single source of truth for the offline-data refresh cadence ──────────────
+// The auto-sync timer interval, the "data is fresh" short-circuit gate inside
+// syncOfflineData(), and the getSyncStatus().isStale check ALL derive from this
+// one constant so they can never drift apart. (Previously these were three
+// independent "2h" literals — lowering only one left the effective cadence at
+// the largest value.) In-cab dispatch wants ~hourly freshness.
+export const FRESHNESS_TTL_MS = 60 * 60 * 1000 // 1 hour
+// When the device has NO cached data yet (cold cab), the auto-sync scheduler
+// retries on this short cadence instead of waiting a full hour, until the first
+// successful sync lands.
+const COLD_RETRY_MS = 45 * 1000 // 45 seconds
+
 // ============================================
 // TYPE DEFINITIONS - Complete Offline Data
 // ============================================
@@ -349,7 +361,13 @@ class OfflineDataSyncService {
   // freshness gate inside syncOfflineData will short-circuit if the last
   // sync is still fresh, so this is just a lightweight "wake up and check".
   private autoSyncTimer: number | null = null
-  private static readonly AUTO_SYNC_INTERVAL_MS = 2 * 60 * 60 * 1000
+  // Hourly bump — equals the freshness TTL so a tick always has a real chance to
+  // refresh (a longer interval than the TTL would let data go stale between ticks;
+  // a shorter one would just hit the fresh-gate no-op).
+  private static readonly AUTO_SYNC_INTERVAL_MS = FRESHNESS_TTL_MS
+  // Pending short-retry timer for the cold (no-data) case, so we only ever have
+  // one outstanding retry queued.
+  private coldRetryTimer: number | null = null
 
   /** True when IDB is unusable and we're serving lookups from RAM. */
   isInMemoryMode(): boolean {
@@ -357,32 +375,80 @@ class OfflineDataSyncService {
   }
 
   /**
-   * Start the 2-hour background auto-sync. Safe to call multiple times —
-   * additional calls are no-ops. Call once during app bootstrap.
+   * Start the background auto-sync. Safe to call multiple times — additional
+   * calls are no-ops. Call once during app bootstrap.
    *
-   * The first tick fires ~30 s after start (so login / initial render
-   * isn't competing with a sync). Subsequent ticks fire every 2 hours.
-   * Only triggers while the tab is visible — background tabs skip.
+   * Behaviour:
+   *  - Fires an IMMEDIATE first attempt (so a freshly-provisioned cab starts
+   *    downloading its lookup data right away instead of waiting), then every
+   *    FRESHNESS_TTL_MS (~1h).
+   *  - Skips while the tab is hidden (a parked tablet won't churn).
+   *  - Uses the app's real connectionManager reachability (not just the coarse
+   *    navigator.onLine flag) to decide if we can sync.
+   *  - SELF-HEALS the cold case: if the cache is still empty after a tick
+   *    (offline at boot, weak signal), it schedules a short ~45s retry instead
+   *    of waiting a full hour — until the first successful sync lands.
    */
   startAutoSync(): void {
     if (this.autoSyncTimer !== null) return
-    const tick = () => {
+    const tick = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         console.log('[auto-sync] skipped — tab hidden')
         return
       }
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        console.log('[auto-sync] skipped — offline')
+      if (!(await this.canReachServer())) {
+        console.log('[auto-sync] skipped — no connectivity')
+        // Cold device with no data yet → keep trying soon rather than in 1h.
+        if (!(await this.hasAnyData())) this.scheduleColdRetry(tick)
         return
       }
-      this.syncOfflineData(false).catch((err) => {
-        console.warn('[auto-sync] delta attempt failed:', err)
-      })
+      try {
+        await this.syncOfflineData(false)
+      } catch (err) {
+        console.warn('[auto-sync] attempt failed:', err)
+      }
+      // If we STILL have nothing cached, retry on the short cadence.
+      if (!(await this.hasAnyData())) this.scheduleColdRetry(tick)
     }
-    // Initial delayed tick so we don't fight app bootstrap
-    window.setTimeout(tick, 30000)
-    this.autoSyncTimer = window.setInterval(tick, OfflineDataSyncService.AUTO_SYNC_INTERVAL_MS)
-    console.log('[auto-sync] scheduler started (every 2h, foreground only)')
+    // Immediate first attempt + hourly interval thereafter.
+    void tick()
+    this.autoSyncTimer = window.setInterval(() => { void tick() }, OfflineDataSyncService.AUTO_SYNC_INTERVAL_MS)
+    console.log(`[auto-sync] scheduler started (every ${Math.round(FRESHNESS_TTL_MS / 60000)}m, foreground only)`)
+  }
+
+  /** Schedule a single short cold-retry tick (deduped). Cleared on first data. */
+  private scheduleColdRetry(tick: () => void | Promise<void>): void {
+    if (this.coldRetryTimer !== null) return
+    this.coldRetryTimer = window.setTimeout(() => {
+      this.coldRetryTimer = null
+      void tick()
+    }, COLD_RETRY_MS)
+    console.log(`[auto-sync] cold cache — retrying in ${Math.round(COLD_RETRY_MS / 1000)}s`)
+  }
+
+  /** Has the device cached ANY lookup data yet? (people store / memory map.) */
+  private async hasAnyData(): Promise<boolean> {
+    try {
+      const st = await this.getSyncStatus()
+      return !!st.hasData
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Real reachability check, preferred over navigator.onLine (which reports
+   * link-layer connectivity, not whether our API actually answers — a cab on a
+   * captive-portal / firewalled link reads online but every sync would fail).
+   * Falls back to navigator.onLine if connectionManager isn't available.
+   */
+  private async canReachServer(): Promise<boolean> {
+    try {
+      const { connectionManager } = await import('./connectionManager')
+      return connectionManager.getStatus().isOnline
+    } catch {
+      return typeof navigator === 'undefined' ? true : navigator.onLine !== false
+    }
   }
 
   /** Stop the auto-sync scheduler. */
@@ -390,6 +456,10 @@ class OfflineDataSyncService {
     if (this.autoSyncTimer !== null) {
       clearInterval(this.autoSyncTimer)
       this.autoSyncTimer = null
+    }
+    if (this.coldRetryTimer !== null) {
+      clearTimeout(this.coldRetryTimer)
+      this.coldRetryTimer = null
     }
   }
 
@@ -590,9 +660,8 @@ class OfflineDataSyncService {
         if (!force) {
           const lastSync = await this.getLastSyncTime()
           const timeSinceSync = Date.now() - lastSync
-          const SYNC_INTERVAL = 2 * 60 * 60 * 1000 // 2 hours
 
-          if (timeSinceSync < SYNC_INTERVAL) {
+          if (timeSinceSync < FRESHNESS_TTL_MS) {
             return {
               success: true,
               message: `Data is fresh (synced ${Math.round(timeSinceSync / 60000)} minutes ago)`,
@@ -1885,7 +1954,7 @@ class OfflineDataSyncService {
         employeesCount: safeEmployeeCount,
         employeeCardsCount: storeCounts.employeeCards || (typeof employeeCardsCount?.value === 'number' ? employeeCardsCount.value : 0),
         dataVersion: dataVersion?.value || 'unknown',
-        isStale: requiresRepair || Date.now() - (lastSync?.value || 0) > 2 * 60 * 60 * 1000 // 2 hours
+        isStale: requiresRepair || Date.now() - (lastSync?.value || 0) > FRESHNESS_TTL_MS
       }
     } catch (error) {
       console.error('❌ Failed to get sync status:', error)

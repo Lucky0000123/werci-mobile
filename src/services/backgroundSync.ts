@@ -95,8 +95,9 @@ export async function flushAllPending(): Promise<void> {
     // 0. Pull fresh people data into the offline cache if it's gone stale.
     //    Runs on every background-fetch tick (~15 min, even headless), every
     //    foreground return, and every reconnect — so the user never has to
-    //    manually refresh. The 2 h freshness gate keeps real fetches to once
-    //    per ~2 h; in between this is a cheap local no-op.
+    //    manually refresh. The ~1 h freshness gate keeps real fetches to once
+    //    per hour; in between this is a cheap local no-op. A cold (empty) cache
+    //    forces a one-shot initial sync here so it self-heals on reconnect.
     await refreshPeopleDataIfStale()
 
     // 1. Sync existing inspection/photo queue
@@ -123,9 +124,11 @@ export async function flushAllPending(): Promise<void> {
  * against recent data without ever tapping "sync". Safe to call on every
  * background tick / foreground return / reconnect because it's gated three ways:
  *   - only when signed in (a token exists),
- *   - only after an initial sync (so we run a fast DELTA here, never the heavy
- *     first-time chunked download inside a constrained background window),
- *   - syncOfflineData's own 2 h freshness gate makes it a no-op when fresh.
+ *   - cold devices (no cache yet) run a one-shot forced initial sync HERE too,
+ *     so a freshly-provisioned cab that never hit the foreground sign-in path
+ *     still self-heals on the first reconnect / foreground return,
+ *   - syncOfflineData's own freshness gate (~1 h) makes the warm path a no-op
+ *     when fresh, and the chunked download keeps RAM flat even on the cold path.
  */
 async function refreshPeopleDataIfStale(): Promise<void> {
   try {
@@ -135,7 +138,18 @@ async function refreshPeopleDataIfStale(): Promise<void> {
 
     const { offlineDataSync } = await import('./offlineDataSync')
     const status = await offlineDataSync.getSyncStatus()
-    if (!status.hasData) return // let the foreground run the first full sync
+    if (!status.hasData) {
+      // Cold device: run the first full (chunked) sync right here instead of
+      // bailing. This is the sync-on-reconnect / sync-on-foreground path for a
+      // cab that booted with a session token but never completed an initial
+      // sync — the exact cause of the in-cab "no sync data" dead-end.
+      // force=true still routes to performInitialChunkedSync (no cursor yet),
+      // so memory stays ~20 MB; syncInProgress guards against overlap.
+      const cold = await offlineDataSync.syncOfflineData(true)
+      if (cold.success) console.log('[BackgroundSync] cold initial sync complete:', cold.message)
+      else console.warn('[BackgroundSync] cold initial sync failed:', cold.message)
+      return
+    }
 
     const result = await offlineDataSync.syncOfflineData(false)
     if (result.success && !result.cached) {

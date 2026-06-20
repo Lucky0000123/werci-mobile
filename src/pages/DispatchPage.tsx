@@ -213,7 +213,20 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
       if (r.ok && data.success) { setProfile(data.profile as Profile); setProfileOffline(false) }
       else if (!cached) setError(data.message || `Employee ${id} not found in Kimper`)
     } catch {
-      if (!cached) setError(dt('no_signal_id'))
+      // Network unreachable AND no cached hit. Distinguish "the offline data
+      // simply hasn't downloaded yet" (cold cab) from "this ID genuinely isn't
+      // in the saved list", so the driver sees a reassuring "syncing…" message
+      // instead of a dead-end error — and kick a forced sync to self-heal.
+      if (!cached) {
+        let dataReady = false
+        try {
+          const { offlineDataSync } = await import('../services/offlineDataSync')
+          const st = await offlineDataSync.getSyncStatus()
+          dataReady = !!st.hasData
+          if (!dataReady) offlineDataSync.syncOfflineData(true).catch(() => { /* scheduler will retry */ })
+        } catch { /* offlineDataSync unavailable — fall through to generic error */ }
+        setError(dataReady ? dt('no_signal_id') : dt('data_not_ready_syncing'))
+      }
     } finally {
       setLoading(false)
     }

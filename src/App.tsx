@@ -18,6 +18,7 @@ import ToastContainer from './components/ToastContainer'
 import { I18nProvider, useI18n } from './services/i18n-context'
 import { type Language } from './services/i18n'
 import { connectionManager } from './services/connectionManager'
+import type { ConnectionStatus } from './services/connectionManager'
 import { offlineDataSync } from './services/offlineDataSync'
 // import { apiFetch } from './services/api'
 import { initBackgroundSync } from './services/backgroundSync'
@@ -324,7 +325,7 @@ function AppContent() {
     return () => unsub?.()
   }, [])
 
-  // Kick the 2-hour background auto-sync once the user is signed in. The
+  // Kick the hourly background auto-sync once the user is signed in. The
   // service's internal freshness gate means most ticks are a cheap no-op;
   // ticks that pass the gate run delta mode (usually < 1 s).
   useEffect(() => {
@@ -336,6 +337,27 @@ function AppContent() {
     return () => {
       offlineDataSync.stopAutoSync()
     }
+  }, [currentUser])
+
+  // Sync-on-reconnect: the instant the app's own health probe flips
+  // offline → online, pull the offline lookup data. Belt-and-suspenders with
+  // the auto-sync scheduler + backgroundSync flush, but fires immediately on a
+  // confirmed reconnect (the exact moment a cab regains signal in the field).
+  // Forces a cold initial sync when the cache is still empty so an in-cab device
+  // that never completed its first sync self-heals without any manual tap.
+  useEffect(() => {
+    if (!currentUser) return
+    let wasOnline = connectionManager.getStatus().isOnline
+    const onStatus = (s: ConnectionStatus) => {
+      if (s.isOnline && !wasOnline) {
+        offlineDataSync.getSyncStatus()
+          .then((st) => offlineDataSync.syncOfflineData(!st.hasData))
+          .catch((e) => console.warn('Sync-on-reconnect failed:', e))
+      }
+      wasOnline = s.isOnline
+    }
+    connectionManager.addStatusListener(onStatus)
+    return () => connectionManager.removeStatusListener(onStatus)
   }, [currentUser])
 
   // Handle Android back button — MUST be before any conditional return
@@ -448,9 +470,18 @@ function AppContent() {
       navigate('/dispatch', { replace: true })
       // Warm the on-device cache so the cab can identify employees offline.
       addToast('info', 'Syncing dispatch data for offline use…')
-      offlineDataSync.syncOfflineData()
-        .then(() => addToast('success', 'Data cached — ready offline'))
-        .catch(() => { /* will retry on the auto-sync schedule */ })
+      offlineDataSync.syncOfflineData(true)
+        .then((r) => {
+          if (r.success) addToast('success', 'Data cached — ready offline')
+          // A failure here is non-fatal: the auto-sync scheduler retries on a
+          // short cold cadence and on every reconnect/foreground. Surface it so
+          // a provisioning tech knows the first sync hasn't landed yet.
+          else addToast('error', 'Offline data not ready yet — will keep retrying')
+        })
+        .catch((e) => {
+          console.warn('[fms] initial dispatch sync failed (will retry):', e)
+          addToast('error', 'Offline data not ready yet — will keep retrying')
+        })
     } catch (error) {
       console.warn('[fms] silent sign-in failed:', error)
       setCabAuthFailed(true)   // → picker shows an error

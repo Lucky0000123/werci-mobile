@@ -15,6 +15,7 @@ const { initMock, addListenerMock, minimizeAppMock, removeBackHandlerMock, boots
 vi.mock('../services/connectionManager', () => ({
   connectionManager: {
     init: initMock,
+    getStatus: vi.fn(() => ({ isOnline: false, currentMode: 'offline', cloudAvailable: false, localAvailable: false, lastChecked: 0 })),
     addStatusListener: vi.fn(),
     removeStatusListener: vi.fn()
   }
@@ -25,7 +26,9 @@ vi.mock('../services/offlineDataSync', () => ({
     addSyncListener: vi.fn(),
     removeSyncListener: vi.fn(),
     startAutoSync: vi.fn(),
-    stopAutoSync: vi.fn()
+    stopAutoSync: vi.fn(),
+    getSyncStatus: vi.fn(async () => ({ hasData: false, lastSync: 0, totalRecords: 0 })),
+    syncOfflineData: vi.fn(async () => ({ success: true, message: 'mock' }))
   }
 }))
 

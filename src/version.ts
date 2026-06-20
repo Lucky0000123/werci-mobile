@@ -7,6 +7,24 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.30.0 — Offline-first sign-on reliability + hourly refresh. Fixes the in-cab
+ *          "no sync data" dead-end when a driver enters their Employee ID on a
+ *          freshly-provisioned or just-rebooted cab whose offline operator cache
+ *          never finished downloading. Changes: (1) the offline-data refresh
+ *          cadence drops from 2 h to ~1 h, driven by a SINGLE shared
+ *          FRESHNESS_TTL_MS so the auto-sync timer, the "data is fresh" gate and
+ *          the isStale check can never drift apart again. (2) The auto-sync
+ *          scheduler now fires an IMMEDIATE first attempt (no 30 s wait), uses the
+ *          app's real connectivity probe instead of navigator.onLine, and
+ *          SELF-HEALS a cold cache by retrying every ~45 s until the first sync
+ *          lands. (3) backgroundSync no longer skips empty caches — a cold device
+ *          force-runs its first chunked sync on the next reconnect / foreground /
+ *          background-fetch tick. (4) A new app-level sync-on-reconnect listener
+ *          pulls data the instant the cab regains signal. (5) identify() now shows
+ *          a reassuring "Preparing offline data… syncing" message (and kicks a
+ *          forced sync) when the cache is simply empty, instead of the
+ *          "no signal / not in saved list" error. (6) The FMS cold-start sync is
+ *          now visible + retried instead of silently swallowed.
  * 2.29.0 — Sign-on usability + site-only map. (1) The FMS sign-on header now has
  *          a LANGUAGE switcher (🇮🇩/🇬🇧/🇨🇳) and a SIGN OUT button, so an operator
  *          on a shared device — or a normal employee-card user who landed on the
@@ -224,4 +242,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.29.0'
+export const APP_VERSION = '2.30.0'
