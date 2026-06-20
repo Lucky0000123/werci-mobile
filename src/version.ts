@@ -7,6 +7,24 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.31.0 — Offline action outbox (the cab keeps WORKING with no signal). Every
+ *          in-cab driver/operator action — first-bucket, cycle advance, manual
+ *          equipment status, disconnect — is now captured the instant it's
+ *          tapped and replayed in order when signal returns, so nothing is lost
+ *          when a truck drives into a no-coverage pit. New dispatchOutbox.ts
+ *          (IndexedDB, per-truck FIFO) + submitDispatchAction()/syncPendingDispatch()
+ *          in backgroundSync (drained on every reconnect / foreground /
+ *          background-fetch tick alongside the other queues). Each action
+ *          carries a client_event_id (UUID) + client_ts; the SERVER dedups
+ *          replays against a new PRISM_DISPATCH_CLIENT_EVENTS ledger and stamps
+ *          the real tap time, so a replay never creates a duplicate pairing /
+ *          load-event / zone-event / status row. cycle-advance gains a
+ *          FORWARD-ONLY guard: a stale queued advance that is behind the truck's
+ *          GPS-advanced state returns 409 {stale} and is silently reconciled
+ *          (dequeued) instead of dragging the truck backwards. The driver sees a
+ *          "✓ Saved offline" confirmation and an "N pending sync" badge. All new
+ *          request fields are optional, so the web dispatcher + older builds are
+ *          unaffected. (Phase 2 of the offline-first cab work.)
  * 2.30.0 — Offline-first sign-on reliability + hourly refresh. Fixes the in-cab
  *          "no sync data" dead-end when a driver enters their Employee ID on a
  *          freshly-provisioned or just-rebooted cab whose offline operator cache
@@ -242,4 +260,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.30.0'
+export const APP_VERSION = '2.31.0'

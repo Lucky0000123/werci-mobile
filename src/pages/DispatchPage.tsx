@@ -14,6 +14,8 @@
 // maintenance) post to /api/dispatch/equipment-status and never break the cycle.
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import { apiFetch } from '../services/api'
+import { submitDispatchAction } from '../services/backgroundSync'
+import { DispatchOutbox } from '../services/dispatchOutbox'
 import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { buildOfflineProfile } from '../services/dispatchEngine'
@@ -113,18 +115,26 @@ const STATE_STYLE: Record<string, StateStyle> = {
 // which maps the 12 operator states onto the 8 wheel segments + colour legend.
 // Truck DRIVER primary action per state (from the prototype's truckActionButtons).
 // kind 'first_bucket' → POST /loading/start; 'advance' → POST /cycle-advance to `next`.
+//
+// CYCLE POLICY (current site = LD.01 → DUMP.01, no weighbridge/sample GPS yet):
+//   Only TWO actions are human-driven — the driver's First Bucket (spot→loading)
+//   and the excavator's FULL·Kickout (loading→fullTravel1). EVERYTHING ELSE
+//   auto-advances by GPS on the server (fullTravel1→dumping→emptyTravel1→requeue).
+//   The weighbridge/sampling legs are RESERVED placeholders — they stay out of
+//   the driver action map until those locations gain GPS coordinates, at which
+//   point the server auto-advances through them too. So the driver only ever
+//   taps First Bucket; the rest is hands-off. (A GPS-down manual fallback is
+//   offered separately via the "Report GPS Unavailable" affordance.)
 type DriverAct = { label: string; color: string; kind: 'first_bucket' | 'advance'; next: string }
 const DRIVER_ACTIONS: Record<string, DriverAct> = {
   spot:         { label: 'Confirm Start Loading',          color: '#FF4FB8', kind: 'first_bucket', next: 'loading' },
-  fullTravel1:  { label: 'Arrived — Full Weighbridge',     color: '#38BDF8', kind: 'advance', next: 'fullWB' },
-  fullWB:       { label: 'Confirm Full Weighbridge',       color: '#38BDF8', kind: 'advance', next: 'fullTravel2' },
-  fullTravel2:  { label: 'Arrived — Sampling',             color: '#C084FC', kind: 'advance', next: 'sampling' },
-  sampling:     { label: 'Complete Sampling',              color: '#C084FC', kind: 'advance', next: 'fullTravel3' },
-  fullTravel3:  { label: 'Arrived — Dump',                 color: '#A16207', kind: 'advance', next: 'dumping' },
+}
+// GPS-down MANUAL fallbacks for the auto legs (only surfaced when the driver
+// reports GPS unavailable, so a stuck truck can still be advanced by hand).
+const DRIVER_FALLBACK_ACTIONS: Record<string, DriverAct> = {
+  fullTravel1:  { label: 'Arrived — Dump',                 color: '#A16207', kind: 'advance', next: 'dumping' },
   dumping:      { label: 'Depart / Complete Dumping',      color: '#A16207', kind: 'advance', next: 'emptyTravel1' },
-  emptyTravel1: { label: 'Arrived — Empty Weighbridge',    color: '#67E8F9', kind: 'advance', next: 'emptyWB' },
-  emptyWB:      { label: 'Confirm Empty Weighbridge',      color: '#67E8F9', kind: 'advance', next: 'emptyTravel2' },
-  emptyTravel2: { label: 'Arrived — Shovel · Join Queue',  color: '#FFE600', kind: 'advance', next: 'waiting' },
+  emptyTravel1: { label: 'Arrived — Shovel · Join Queue',  color: '#FFE600', kind: 'advance', next: 'waiting' },
 }
 
 // Manual equipment statuses (prototype legend) — recorded, do not break the cycle.
@@ -307,8 +317,13 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   async function disconnect(employee_id: string) {
     setLoading(true); setError(null)
     try {
-      await apiFetch('/api/dispatch/disconnect', {
-        method: 'POST', body: JSON.stringify({ employee_id }),
+      // Idempotent on the server (ending 0 active pairings still succeeds), so
+      // it's safe to queue + replay if the cab is offline at end-of-shift.
+      await submitDispatchAction({
+        kind: 'disconnect',
+        endpoint: '/api/dispatch/disconnect',
+        scopeKey: employee_id,
+        payload: { employee_id },
       })
       setResult(null); setConnectedUnit('')
       await identify()      // refresh — active_assignment cleared
@@ -700,6 +715,10 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [manual, setManual] = useState<{ status: string; reason?: string } | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
   const [gpsNote, setGpsNote] = useState(false)
+  // Count of this truck's actions still waiting in the offline outbox, polled on
+  // the existing tick. Drives the "N pending sync" badge so the driver knows a
+  // tap was saved (not lost) while offline.
+  const [pendingCount, setPendingCount] = useState(0)
   const target = useRef(truckNo.trim().toUpperCase())
   useEffect(() => { target.current = truckNo.trim().toUpperCase() }, [truckNo])
 
@@ -746,6 +765,21 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId])
 
+  // Poll the offline outbox for THIS truck's queued actions (works offline,
+  // unlike the network tick) so the "pending sync" badge stays live.
+  useEffect(() => {
+    let alive = true
+    const scope = truckNo.trim().toUpperCase()
+    const poll = () => {
+      DispatchOutbox.getPendingCountByScope(scope)
+        .then((n) => { if (alive) setPendingCount(n) })
+        .catch(() => { /* outbox unavailable */ })
+    }
+    poll()
+    const h = setInterval(poll, 3000)
+    return () => { alive = false; clearInterval(h) }
+  }, [truckNo])
+
   // Live telemetry (position / speed / heading) from the TMS resolver.
   useEffect(() => {
     let alive = true
@@ -785,21 +819,36 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     setActing(true); setMsg('')
     try {
       if (act.kind === 'first_bucket') {
-        const r = await apiFetch('/api/dispatch/loading/start', {
-          method: 'POST',
-          body: JSON.stringify({ plan_id: planId, truck_no: truck.truck_no, excavator_no: excavatorNo, employee_id: employeeId }),
+        const res = await submitDispatchAction({
+          kind: 'loading_start',
+          endpoint: '/api/dispatch/loading/start',
+          scopeKey: truck.truck_no,
+          payload: { plan_id: planId, truck_no: truck.truck_no, excavator_no: excavatorNo, employee_id: employeeId },
+          expectedState: 'loading',
         })
-        const d = await r.json()
-        if (r.ok && d.success) { setMsg('✓'); setTruck((t) => t ? { ...t, state: 'loading', state_color: undefined, state_label: undefined } : t) }
-        else if (r.status === 409) setMsg(d.message || dt('another_loading'))
-        else setMsg(d.message || 'Could not start loading')
+        if (res.ok && res.applied) {
+          setMsg('✓'); setTruck((t) => t ? { ...t, state: 'loading', state_color: undefined, state_label: undefined } : t)
+        } else if (res.ok && !res.applied) {                    // queued offline
+          setMsg(dt('queued_offline')); setTruck((t) => t ? { ...t, state: 'loading', state_color: undefined, state_label: undefined } : t)
+        } else {                                                // rejected
+          const d = res.data
+          setMsg((d?.reason === 'another_truck_loading') ? dt('another_loading') : (d?.message || 'Could not start loading'))
+        }
       } else {
-        const r = await apiFetch('/api/dispatch/cycle-advance', {
-          method: 'POST', body: JSON.stringify({ plan_id: planId, truck_no: truck.truck_no, status: act.next }),
+        const res = await submitDispatchAction({
+          kind: 'cycle_advance',
+          endpoint: '/api/dispatch/cycle-advance',
+          scopeKey: truck.truck_no,
+          payload: { plan_id: planId, truck_no: truck.truck_no, status: act.next, excavator_no: excavatorNo },
+          expectedState: act.next,
         })
-        const d = await r.json()
-        if (r.ok && d.success) { setMsg('✓'); setTruck((t) => t ? { ...t, state: act.next, state_color: undefined, state_label: undefined } : t) }
-        else setMsg(d.message || 'Action failed')
+        if (res.ok && res.applied) {
+          setMsg('✓'); setTruck((t) => t ? { ...t, state: act.next, state_color: undefined, state_label: undefined } : t)
+        } else if (res.ok && !res.applied) {                    // queued offline
+          setMsg(dt('queued_offline')); setTruck((t) => t ? { ...t, state: act.next, state_color: undefined, state_label: undefined } : t)
+        } else {
+          setMsg(res.data?.message || 'Action failed')
+        }
       }
     } catch { setMsg('Network error') } finally { setActing(false) }
   }
@@ -822,15 +871,11 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     ? (geo.dumpLat != null && geo.dumpLng != null ? { lat: geo.dumpLat, lng: geo.dumpLng } : null)
     : (geo.excLat != null && geo.excLng != null ? { lat: geo.excLat, lng: geo.excLng } : null)
   const geofenceM = isFull ? (geo.dumpZoneM ?? 50) : (geo.loadingZoneM ?? 10)
-  // Moving multi-ring geofences around the SHOVEL on the empty/inbound leg —
-  // colour-coded Discovery (100m) / Waiting (20m) / Loading (10m) circles that
-  // follow the excavator's live GPS, so the driver sees the zones as they near
-  // the loader. On a full leg the single dump geofence is used instead.
-  const rings = !isFull && dest ? [
-    { radiusM: geo.discoveryZoneM ?? 100, color: '#38BDF8', label: dt('zone_discovery'), dashed: true },
-    { radiusM: geo.waitingZoneM ?? 20, color: '#FFE600', label: dt('zone_waiting') },
-    { radiusM: geo.loadingZoneM ?? 10, color: '#FF4FB8', label: dt('zone_loading') },
-  ] : null
+  // Moving multi-ring geofences (Discovery 100m / Waiting 20m / Loading 10m)
+  // around the shovel are LOGIC ONLY — the server classifies the truck's zone
+  // from them, but they are intentionally NOT drawn on the driver map (no rings,
+  // no legend, no radii shown). The only driver-facing cue is the Reporting /
+  // Loaded-Departed banner.
   const truckPt = (tel?.lat != null && tel?.lng != null)
     ? { lat: tel.lat, lng: tel.lng, course: tel.course }
     : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
@@ -971,7 +1016,6 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 }}>
                   <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
                           destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
-                          rings={rings}
                           height="100%" visible={viewMode === 'map'} />
                 </div>
                 {viewMode === 'map' && speedKph != null && (
@@ -981,29 +1025,10 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                     <span style={{ color: D.sub, fontSize: '0.62rem', fontWeight: 700 }}>km/h</span>
                   </div>
                 )}
-                {/* Moving-geofence legend — the colour-coded Discovery/Waiting/
-                    Loading rings that follow the shovel, with the truck's CURRENT
-                    zone highlighted. Only on the empty/inbound (loading) leg. */}
-                {viewMode === 'map' && rings && (
-                  <div style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.82)',
-                                border: `1px solid ${D.line2}`, borderRadius: 12, padding: '7px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {[
-                      { z: 'loading', m: geo.loadingZoneM ?? 10, c: '#FF4FB8', l: dt('zone_loading') },
-                      { z: 'waiting', m: geo.waitingZoneM ?? 20, c: '#FFE600', l: dt('zone_waiting') },
-                      { z: 'discovery', m: geo.discoveryZoneM ?? 100, c: '#38BDF8', l: dt('zone_discovery') },
-                    ].map((r) => {
-                      const active = truck?.zone === r.z
-                      return (
-                        <div key={r.z} style={{ display: 'flex', alignItems: 'center', gap: 7, opacity: active ? 1 : 0.62 }}>
-                          <span style={{ width: 11, height: 11, borderRadius: '50%', border: `2px solid ${r.c}`,
-                                         background: active ? r.c : 'transparent', boxShadow: active ? `0 0 7px ${r.c}` : 'none', flexShrink: 0 }} />
-                          <span style={{ color: active ? r.c : D.sub, fontSize: '0.66rem', fontWeight: active ? 900 : 700 }}>{r.l}</span>
-                          <span style={{ color: D.sub, fontSize: '0.58rem', fontWeight: 600, marginLeft: 'auto' }}>{r.m}m</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                {/* Moving-geofence rings (Discovery/Waiting/Loading) are LOGIC ONLY
+                    — deliberately NOT drawn on the driver map nor shown as a legend.
+                    The server still classifies the truck's zone; the only driver-
+                    facing cue is the Reporting/Departed banner below. */}
                 {/* Approach / departure cue banner (Reporting → Loaded/Departed). */}
                 {viewMode === 'map' && (truck?.reporting || truck?.departed) && (
                   <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 500,
@@ -1070,6 +1095,17 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 </div>
               )}
               {msg && msg !== '✓' && <div style={{ fontSize: '0.8rem', color: msg.includes('✓') ? '#86EFAC' : '#FCA5A5', textAlign: 'center', marginTop: 6 }}>{msg}</div>}
+              {pendingCount > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 8,
+                              background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)',
+                              borderRadius: 10, padding: '6px 10px' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 999, background: '#f59e0b',
+                                 boxShadow: '0 0 7px #f59e0b' }} />
+                  <span style={{ color: '#fcd34d', fontSize: '0.74rem', fontWeight: 800 }}>
+                    {pendingCount} {dt('pending_sync')}
+                  </span>
+                </div>
+              )}
               {/* secondary actions UNDER the action/waiting-event */}
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button onClick={() => setStatusOpen(true)} style={secBtn}>Request Status Change</button>
@@ -1161,12 +1197,16 @@ function ManualStatusControl({ unitNo, unitType, employeeId, current, onChange, 
   async function send(status: ManualStatus, reason?: string) {
     setBusy(true)
     try {
-      const r = await apiFetch('/api/dispatch/equipment-status', {
-        method: 'POST',
-        body: JSON.stringify({ unit_no: unitNo, unit_type: unitType, status, reason, employee_id: employeeId }),
+      const res = await submitDispatchAction({
+        kind: 'equipment_status',
+        endpoint: '/api/dispatch/equipment-status',
+        scopeKey: unitNo,
+        payload: { unit_no: unitNo, unit_type: unitType, status, reason, employee_id: employeeId },
       })
-      const d = await r.json()
-      if (r.ok && d.success) { onChange(status, reason); setOpen(false); setPick(null) }
+      // Applied online OR queued offline → reflect locally either way (the
+      // outbox guarantees it lands on reconnect). Only a hard reject keeps the
+      // modal open.
+      if (res.ok) { onChange(status, reason); setOpen(false); setPick(null) }
     } catch { /* keep open */ } finally { setBusy(false) }
   }
 

@@ -10,6 +10,7 @@ import { DeviationStorage } from './deviationStorage'
 import { CommissioningStorage } from './commissioningStorage'
 import { submitCommissioning, type CommissioningSubmitPayload } from './commissioningApi'
 import { apiFetch } from './api'
+import { DispatchOutbox, MAX_DISPATCH_ATTEMPTS, type PendingDispatchAction } from './dispatchOutbox'
 import connectionManager from './connectionManager'
 
 let isBackgroundFetchConfigured = false
@@ -109,7 +110,12 @@ export async function flushAllPending(): Promise<void> {
     // 3. Sync pending commissioning submissions
     await syncPendingCommissioning()
 
-    // 4. Notify user if anything was synced
+    // 4. Replay queued in-cab dispatch actions (status / cycle / connect) that
+    //    were captured while the truck had no signal. Per-truck FIFO + server
+    //    idempotency, so replays never double-advance the haul cycle.
+    await syncPendingDispatch()
+
+    // 5. Notify user if anything was synced
     const pendingCount = await getTotalPendingCount()
     if (pendingCount === 0) {
       await showSyncNotification('Sync complete', 'All data is up to date.')
@@ -280,15 +286,177 @@ async function syncPendingCommissioning(): Promise<void> {
 }
 
 /**
+ * Result of an attempt to submit a single dispatch action.
+ */
+export type DispatchSubmitResult =
+  | { ok: true; applied: true; data: any }       // server applied it now
+  | { ok: true; applied: false; queued: true }   // offline / failed → enqueued for replay
+  | { ok: false; rejected: true; data: any }      // business reject (e.g. not authorized) — surfaced to UI
+
+/**
+ * Submit one in-cab dispatch action with offline durability.
+ *
+ * Tries the network immediately when online; on success returns applied:true.
+ * On a hard business rejection (403/422 that isn't a transient/stale case) it
+ * returns rejected:true so the UI can show the reason. On offline / network
+ * failure / 5xx it ENQUEUES the action (with a minted client_event_id +
+ * client_ts) and returns queued:true so the caller applies optimistic local
+ * state. The queued action is replayed in per-truck FIFO order by
+ * syncPendingDispatch() on the next reconnect / foreground / background tick.
+ */
+export async function submitDispatchAction(args: {
+  kind: PendingDispatchAction['kind']
+  endpoint: string
+  scopeKey: string
+  payload: Record<string, unknown>
+  expectedState?: string
+}): Promise<DispatchSubmitResult> {
+  const clientEventId = (await import('./dispatchOutbox')).newClientEventId()
+  const clientTs = Date.now()
+  const body = { ...args.payload, client_event_id: clientEventId, client_ts: clientTs }
+
+  if (connectionManager.getStatus().isOnline) {
+    try {
+      const r = await apiFetch(args.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      let data: any = null
+      try { data = await r.json() } catch { /* non-JSON */ }
+      if (r.ok && (data?.success ?? true)) {
+        return { ok: true, applied: true, data }
+      }
+      // A 409 'stale' means the server already advanced past this action — it's
+      // reconciled, not an error. Treat as applied (nothing more to do).
+      if (r.status === 409 && data?.stale) {
+        return { ok: true, applied: true, data }
+      }
+      // Hard business rejections we should SHOW (not retry): not authorized,
+      // another truck loading, validation. These are deterministic — queuing
+      // would just replay the same rejection.
+      if (r.status === 403 || r.status === 400 || r.status === 422 ||
+          (r.status === 409 && data && data.stale !== true)) {
+        return { ok: false, rejected: true, data }
+      }
+      // 5xx / unknown → fall through to enqueue for retry.
+    } catch {
+      // Network dropped mid-send → enqueue.
+    }
+  }
+
+  await DispatchOutbox.enqueue({
+    kind: args.kind,
+    endpoint: args.endpoint,
+    scopeKey: args.scopeKey,
+    payload: body,
+    clientEventId,
+    clientTs,
+    expectedState: args.expectedState,
+  })
+  return { ok: true, applied: false, queued: true }
+}
+
+/**
+ * Replay queued dispatch actions when back online. Per-SCOPE FIFO: actions for
+ * one truck replay in clientSeq order and the scope STOPS on the first failure
+ * (so a later advance never lands before an earlier one). Other scopes drain
+ * independently. Server idempotency (client_event_id) makes replays safe; the
+ * forward-only 409 {stale} is treated as reconciled (dequeue).
+ *
+ * Exported so it can be triggered/tested in isolation; flushAllPending() calls
+ * it as part of the normal flush.
+ */
+export async function syncPendingDispatch(): Promise<void> {
+  if (!connectionManager.getStatus().isOnline) return
+  let pending: PendingDispatchAction[]
+  try {
+    pending = await DispatchOutbox.getPending()
+  } catch (e) {
+    console.warn('[BackgroundSync] dispatch outbox unavailable:', e)
+    return
+  }
+  if (pending.length === 0) return
+
+  const { authService } = await import('./auth')
+  const token = await authService.getToken().catch(() => null)
+  if (!token) {
+    console.warn('[BackgroundSync] no token — pausing dispatch replay')
+    return
+  }
+
+  // Group by scope, preserving the global sort (already scope→seq→localId).
+  const byScope = new Map<string, PendingDispatchAction[]>()
+  for (const a of pending) {
+    const arr = byScope.get(a.scopeKey) || []
+    arr.push(a)
+    byScope.set(a.scopeKey, arr)
+  }
+
+  console.log(`[BackgroundSync] replaying ${pending.length} dispatch action(s) across ${byScope.size} scope(s)`)
+
+  // Scopes are independent → replay them in parallel; within a scope, strict FIFO.
+  await Promise.all(Array.from(byScope.values()).map(async (actions) => {
+    for (const action of actions) {
+      try {
+        const r = await apiFetch(action.endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action.payload),
+        }, { token })
+        let data: any = null
+        try { data = await r.json() } catch { /* non-JSON */ }
+
+        if (r.ok && (data?.success ?? true)) {
+          await DispatchOutbox.removePending(action._localId)        // applied (or deduped)
+          continue
+        }
+        if (r.status === 409 && data?.stale) {
+          // Server already moved past this state (GPS / web). Obsolete, not an error.
+          await DispatchOutbox.removePending(action._localId)
+          console.log(`[BackgroundSync] dispatch ${action.kind} reconciled (stale) scope=${action.scopeKey}`)
+          continue
+        }
+        if (r.status === 403 || r.status === 400 || r.status === 422 ||
+            (r.status === 409 && data && data.stale !== true)) {
+          // Deterministic rejection — drop it (replaying won't help) and move on
+          // within this scope (it's terminal for this action, not the scope).
+          await DispatchOutbox.removePending(action._localId)
+          console.warn(`[BackgroundSync] dispatch ${action.kind} rejected (${r.status}), dropped:`, data?.message)
+          continue
+        }
+        // 5xx / transient → record attempt; STOP this scope to preserve FIFO.
+        const attempts = await DispatchOutbox.recordAttempt(action._localId, `HTTP ${r.status}`)
+        if (attempts >= MAX_DISPATCH_ATTEMPTS) {
+          await DispatchOutbox.removePending(action._localId)
+          console.warn(`[BackgroundSync] dispatch ${action.kind} gave up after ${attempts} attempts`)
+          continue
+        }
+        break
+      } catch (e) {
+        // Network dropped again → stop this scope, leave the rest pending.
+        const msg = e instanceof Error ? e.message : String(e)
+        const attempts = await DispatchOutbox.recordAttempt(action._localId, msg)
+        if (attempts >= MAX_DISPATCH_ATTEMPTS) {
+          await DispatchOutbox.removePending(action._localId)
+        }
+        break
+      }
+    }
+  }))
+}
+
+/**
  * Get total count of pending items across all queues.
  */
 export async function getTotalPendingCount(): Promise<number> {
-  const [syncStatus, deviationCount, commissioningCount] = await Promise.all([
+  const [syncStatus, deviationCount, commissioningCount, dispatchCount] = await Promise.all([
     syncService.getStatus().catch(() => ({ pendingItems: 0 })),
     DeviationStorage.getPendingCount().catch(() => 0),
-    CommissioningStorage.getPendingCount().catch(() => 0)
+    CommissioningStorage.getPendingCount().catch(() => 0),
+    DispatchOutbox.getPendingCount().catch(() => 0)
   ])
-  return syncStatus.pendingItems + deviationCount + commissioningCount
+  return syncStatus.pendingItems + deviationCount + commissioningCount + dispatchCount
 }
 
 /**
