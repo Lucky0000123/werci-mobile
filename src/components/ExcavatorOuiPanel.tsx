@@ -41,6 +41,8 @@ type OpExcavator = {
   exc_status_color?: string
   exc_status_label?: string
   next_truck_no?: string | null
+  preferred_next_truck?: string | null
+  next_is_override?: boolean
   target_trips?: number | null
   target_tonnes?: number | null
   planned_truck_count?: number | null
@@ -167,6 +169,7 @@ export default function ExcavatorOuiPanel({
   const [pickStatus, setPickStatus] = useState<ManualStatus | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  const [nextBusy, setNextBusy] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -184,7 +187,7 @@ export default function ExcavatorOuiPanel({
       }
     }
     poll()
-    const h = setInterval(poll, 6000)
+    const h = setInterval(poll, 2000)
     return () => { alive = false; clearInterval(h) }
   }, [employeeId])
 
@@ -244,6 +247,25 @@ export default function ExcavatorOuiPanel({
       setMsg('Network error')
     } finally {
       setActing(false)
+    }
+  }
+
+  // Excavator-operator OVERRIDE: tap a queued truck to make it the next to spot
+  // (when the auto longest-waiting pick can't load). Tapping the current 'next'
+  // again clears the override back to automatic.
+  async function chooseNext(truckNo: string) {
+    if (!planId || nextBusy) return
+    const clear = truckNo === nextNo && !!view?.excavator?.preferred_next_truck
+    setNextBusy(true)
+    try {
+      await apiFetch('/api/dispatch/loading/next-truck', {
+        method: 'POST',
+        body: JSON.stringify({ plan_id: planId, truck_no: clear ? null : truckNo }),
+      })
+      // optimistic: reflect immediately; the 2s poll will confirm
+      setView((v) => v ? { ...v, excavator: { ...v.excavator, next_truck_no: clear ? undefined : truckNo, preferred_next_truck: clear ? undefined : truckNo } } as OpView : v)
+    } catch { /* poll will correct */ } finally {
+      setNextBusy(false)
     }
   }
 
@@ -370,23 +392,41 @@ export default function ExcavatorOuiPanel({
                 </div>
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   {queue.length === 0 && <div style={{ color: P.muted, fontSize: '0.84rem' }}>{dt('no_trucks_feed')}</div>}
+                  {queue.length > 0 && (
+                    <div style={{ color: P.muted, fontSize: '0.62rem', fontWeight: 700, marginBottom: 6 }}>
+                      {dt('tap_to_load_next')}
+                    </div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 6 }}>
                     {queue.map((t) => {
                       const isNext = t.truck_no === nextNo
+                      const isOverride = isNext && !!view?.excavator?.next_is_override
+                      const tappable = t.state === 'waiting' || t.state === 'spot'
                       return (
-                        <div key={t.truck_no} style={{
-                          ...panel,
-                          padding: '8px 10px',
-                          border: isNext ? `1px solid ${P.waiting}66` : `1px solid ${P.line}`,
-                          background: isNext ? `${P.waiting}12` : P.panel2,
-                        }}>
-                          <div style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '1.05rem', color: P.ink }}>
-                            {fmtTruck(t.truck_no)}
+                        <button key={t.truck_no} type="button"
+                          onClick={() => tappable && chooseNext(t.truck_no)}
+                          disabled={!tappable || nextBusy}
+                          style={{
+                            ...panel,
+                            textAlign: 'left', cursor: tappable ? 'pointer' : 'default',
+                            padding: '8px 10px',
+                            border: isNext ? `2px solid ${P.waiting}` : `1px solid ${P.line}`,
+                            background: isNext ? `${P.waiting}1e` : P.panel2,
+                          }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                            <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 900, fontSize: '1.05rem', color: P.ink }}>
+                              {fmtTruck(t.truck_no)}
+                            </span>
+                            {isNext && (
+                              <span style={{ fontSize: '0.54rem', fontWeight: 900, color: P.waiting, letterSpacing: '0.04em' }}>
+                                {isOverride ? '★ ' + dt('next').toUpperCase() : dt('next').toUpperCase()}
+                              </span>
+                            )}
                           </div>
                           <div style={{ color: P.muted, fontSize: '0.72rem', fontWeight: 700, marginTop: 2 }}>
                             {fmtMin(t.time_in_state_s)}
                           </div>
-                        </div>
+                        </button>
                       )
                     })}
                   </div>
@@ -428,7 +468,7 @@ export default function ExcavatorOuiPanel({
                     boxShadow: loadingTruck ? `0 0 24px ${P.accent}44` : 'none',
                   }}
                 >
-                  {acting ? dt('recording') : dt('full')}
+                  {acting ? dt('recording') : (loadingTruck ? dt('full_kickout') : dt('full'))}
                 </button>
                 <div style={{ marginTop: 8, fontSize: '0.76rem', fontWeight: 700, color: P.sub }}>
                   {loadingTruck ? `${dt('complete_load')} · ${fmtTruck(loadingTruck.truck_no)}` : dt('no_truck_loading')}

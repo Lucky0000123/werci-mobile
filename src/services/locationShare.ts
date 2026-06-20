@@ -125,6 +125,19 @@ interface NormalizedFix {
 
 let lastFix: NormalizedFix | null = null
 
+export type DeviceFix = NormalizedFix
+
+/**
+ * The most recent device GPS fix captured by the always-on location watcher, or
+ * null if none yet. Exposed for the offline dispatch cycle engine: when the cab
+ * loses signal the truck position can come from the phone's own GPS instead of
+ * the server TMS resolver. Zero extra battery cost — the watcher already runs
+ * once the user is signed in (site safety policy).
+ */
+export function getLastFix(): NormalizedFix | null {
+  return lastFix
+}
+
 export function isSharing(): boolean {
   return Boolean(watchId || bgWatcherId)
 }

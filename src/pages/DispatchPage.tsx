@@ -14,11 +14,11 @@
 // maintenance) post to /api/dispatch/equipment-status and never break the cycle.
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import { apiFetch } from '../services/api'
-import { submitDispatchAction } from '../services/backgroundSync'
+import { submitDispatchAction, submitCycleEvent } from '../services/backgroundSync'
 import { DispatchOutbox } from '../services/dispatchOutbox'
+import { advanceOffline, buildOfflineProfile, type CycleState, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
 import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
-import { buildOfflineProfile } from '../services/dispatchEngine'
 import { useDispatchT } from '../services/dispatchI18n'
 import { useI18n, type Language } from '../services/i18n-context'
 import NavMap from '../components/NavMap'
@@ -719,8 +719,85 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   // the existing tick. Drives the "N pending sync" badge so the driver knows a
   // tap was saved (not lost) while offline.
   const [pendingCount, setPendingCount] = useState(0)
+  // Online/offline (the cab's own reachability probe) + the device's own GPS fix.
+  // When offline, the local cycle engine drives state from the phone's GPS; when
+  // online the server operator-view is authoritative and overwrites local state.
+  const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
+  const [deviceFix, setDeviceFix] = useState<DeviceFix | null>(null)
+  const [engineActive, setEngineActive] = useState(false)
+  // Refs the engine reads without re-subscribing every GPS tick.
+  const stateRef = useRef<string | undefined>(undefined)
+  const geoRef = useRef<CycleGeo>({})
+  const planRef = useRef<number | null>(null)
+  const excRef = useRef<string | null>(null)
   const target = useRef(truckNo.trim().toUpperCase())
   useEffect(() => { target.current = truckNo.trim().toUpperCase() }, [truckNo])
+
+  // Keep the engine's input refs in sync with the latest server-known state so a
+  // GPS fix can compute the next transition without re-running its effect.
+  useEffect(() => { stateRef.current = truck?.state }, [truck?.state])
+  useEffect(() => { geoRef.current = geo }, [geo])
+  useEffect(() => { planRef.current = planId }, [planId])
+  useEffect(() => { excRef.current = excavatorNo }, [excavatorNo])
+
+  // Track the cab's own reachability (offline → the GPS engine takes over).
+  useEffect(() => {
+    const cb = (s: ConnectionStatus) => setOnline(s.isOnline)
+    connectionManager.addStatusListener(cb)
+    setOnline(connectionManager.getStatus().isOnline)
+    return () => connectionManager.removeStatusListener(cb)
+  }, [])
+
+  // Poll the device's OWN GPS (the always-on location watcher already keeps it).
+  // Used as the offline-first truck position + the cycle engine's input. Cheap:
+  // it just reads a module-level fix, no new GPS request.
+  useEffect(() => {
+    let alive = true
+    const poll = () => {
+      import('../services/locationShare')
+        .then((m) => {
+          const f = m.getLastFix()
+          if (alive && f) setDeviceFix({ lat: f.lat, lng: f.lng, ts: f.ts, heading: f.heading })
+        })
+        .catch(() => { /* location share unavailable */ })
+    }
+    poll()
+    const h = setInterval(poll, 5000)
+    return () => { alive = false; clearInterval(h) }
+  }, [])
+
+  // OFFLINE CYCLE ENGINE. When the cab is offline (and we have a device fix +
+  // cached geo), derive forward-only cycle transitions locally and enqueue them
+  // to the outbox. The manual action button always overrides; while ONLINE this
+  // is dormant (the server operator-view tick is authoritative).
+  useEffect(() => {
+    if (online || !deviceFix) { setEngineActive(false); return }
+    const cur = stateRef.current as CycleState | undefined
+    const g = geoRef.current
+    if (!cur) return
+    // Need a destination anchor to compute zones (shovel for inbound, dump for
+    // the post-load leg). If neither is cached we can't drive — stay manual.
+    const haveExc = g.excLat != null && g.excLng != null
+    const haveDump = g.dumpLat != null && g.dumpLng != null
+    if (!haveExc && !haveDump) { setEngineActive(false); return }
+    setEngineActive(true)
+    const res = advanceOffline(cur, deviceFix, g, {
+      plan_id: planRef.current, truck_no: target.current, excavator_no: excRef.current,
+    })
+    if (res.events.length === 0) return
+    // Apply the local state immediately (so the UI/map keep moving offline) and
+    // enqueue the SAME transitions the server would have raised.
+    if (res.next !== cur) {
+      setTruck((t) => t ? { ...t, state: res.next, state_color: undefined, state_label: undefined } : t)
+    }
+    for (const ev of res.events) {
+      submitCycleEvent({
+        kind: ev.kind, plan_id: ev.plan_id, truck_no: ev.truck_no, excavator_no: ev.excavator_no,
+        status: ev.status, zone_type: ev.zone_type, event_type: ev.event_type, distance_m: ev.distance_m,
+      }).catch(() => { /* queued for replay */ })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, deviceFix])
 
   useEffect(() => {
     let alive = true
@@ -855,7 +932,10 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
 
   const st = truck?.state
   const v2 = st ? STATE_STYLE[st] : undefined
-  const act = st ? DRIVER_ACTIONS[st] : undefined
+  // Driver's primary action: normally only First Bucket (everything else auto-
+  // advances by GPS). When the driver reports GPS unavailable, surface the manual
+  // fallback for the current post-load leg so a stuck truck can be advanced.
+  const act = st ? (DRIVER_ACTIONS[st] || (gpsNote ? DRIVER_FALLBACK_ACTIONS[st] : undefined)) : undefined
   const actLabel = st ? dt('drv_' + st) : ''
   const nextStyle = act ? STATE_STYLE[act.next] : undefined
   const nextLabel = nextStyle?.label || act?.next
@@ -876,7 +956,13 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   // from them, but they are intentionally NOT drawn on the driver map (no rings,
   // no legend, no radii shown). The only driver-facing cue is the Reporting /
   // Loaded-Departed banner.
-  const truckPt = (tel?.lat != null && tel?.lng != null)
+  // Truck position: OFFLINE → trust the phone's own GPS (so the map + engine
+  // keep working with no signal); ONLINE → the server TMS resolver (carries
+  // speed/course and avoids draining only-this-device battery); finally the
+  // last server-known position.
+  const truckPt = (!online && deviceFix)
+    ? { lat: deviceFix.lat, lng: deviceFix.lng, course: deviceFix.heading ?? null }
+    : (tel?.lat != null && tel?.lng != null)
     ? { lat: tel.lat, lng: tel.lng, course: tel.course }
     : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
   const speedKph = tel?.speed != null ? Math.max(0, Math.round(tel.speed)) : null
@@ -1103,6 +1189,16 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                                  boxShadow: '0 0 7px #f59e0b' }} />
                   <span style={{ color: '#fcd34d', fontSize: '0.74rem', fontWeight: 800 }}>
                     {pendingCount} {dt('pending_sync')}
+                  </span>
+                </div>
+              )}
+              {engineActive && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 8,
+                              background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.4)',
+                              borderRadius: 10, padding: '6px 10px' }}>
+                  <span style={{ fontSize: '0.85rem' }}>📡</span>
+                  <span style={{ color: '#7dd3fc', fontSize: '0.72rem', fontWeight: 800 }}>
+                    {dt('offline_local_gps')}
                   </span>
                 </div>
               )}

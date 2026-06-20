@@ -7,6 +7,38 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.33.0 — Offline GPS trigger engine (the cab auto-tracks the haul cycle with
+ *          no signal). When the truck loses signal, the in-cab driver screen now
+ *          derives arrival/departure transitions from the DEVICE's own GPS
+ *          (the always-on safety watcher's last fix — zero extra battery) instead
+ *          of the server TMS feed: the map follows the phone, and a forward-only
+ *          cycle engine (ported verbatim from dispatch_service.py: haversine_m,
+ *          zone_for, the conservative auto_advance_cycle scope) fires the SAME
+ *          transitions the server would — inbound "Reporting" at the discovery
+ *          ring, arrival → Waiting, and the post-load dump-zone enter/exit
+ *          (fullTravel1→dumping→emptyTravel1). Those transitions are enqueued to
+ *          the offline outbox (Phase 2) and replayed idempotently on reconnect.
+ *          AUTHORITY MODEL: the server is always authoritative when online (its
+ *          operator-view tick overwrites local state every 5 s); the engine only
+ *          drives while offline and is otherwise a dormant shadow. The MANUAL
+ *          action button always overrides. spot↔loading + the weighbridge/
+ *          sampling legs stay manual offline (the server never GPS-drives them
+ *          either); a solo offline cab only ever claims "Waiting", never "spot"
+ *          (the server re-arbitrates the queue on reconnect). New "Offline ·
+ *          tracking on local GPS" badge. (Phase 3 — completes the offline-first
+ *          cab.)
+ * 2.32.0 — Dispatch workflow fixes (real-scenario hardening). (1) First Bucket
+ *          now reflects on the EXCAVATOR screen instantly (2s poll) — it shows
+ *          LOADING + a "FULL · KICKOUT DT" button the moment the driver confirms,
+ *          instead of only updating on FULL. (2) Excavator operator can OVERRIDE
+ *          the auto "longest-waiting next" pick: tap any queued truck to load it
+ *          next (★ marks an override); tapping it again reverts to automatic. (3)
+ *          The truck DRIVER now only taps First Bucket — the post-load legs
+ *          (→ dump → return → re-queue) AUTO-ADVANCE by GPS (no more manual
+ *          "Arrived" taps); a GPS-down manual fallback stays available. (4)
+ *          Weighbridge + Sampling are reserved PLACEHOLDERS, skipped until those
+ *          locations get GPS coords. (5) The Discovery/Waiting/Loading geofence
+ *          rings are LOGIC-ONLY — removed from the dump-truck map (no rings/legend).
  * 2.31.0 — Offline action outbox (the cab keeps WORKING with no signal). Every
  *          in-cab driver/operator action — first-bucket, cycle advance, manual
  *          equipment status, disconnect — is now captured the instant it's
@@ -260,4 +292,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.31.0'
+export const APP_VERSION = '2.33.0'

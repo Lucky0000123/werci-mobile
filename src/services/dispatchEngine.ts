@@ -148,3 +148,147 @@ export async function buildOfflineProfileByKimperId(kimperId: number): Promise<D
   const p = await offlineDataSync.lookupPersonByKimperId(kimperId)
   return p ? profileFromPerson(p) : null
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+//  OFFLINE CYCLE ENGINE — pure helpers ported verbatim from
+//  app/services/dispatch_service.py so the cab can derive arrival/departure
+//  transitions from the DEVICE's own GPS when there is no signal. The server is
+//  always authoritative when online; this only drives state while offline, and
+//  the manual action button always overrides. See docs/offline-cab/03_*.md.
+// ════════════════════════════════════════════════════════════════════════════
+
+// 12-state forward cycle (matches models/dispatch.py TRUCK_STATE_ORDER + the
+// cab's STATE_STYLE/DRIVER_ACTIONS).
+export type CycleState =
+  | 'spot' | 'waiting' | 'loading'
+  | 'fullTravel1' | 'fullWB' | 'fullTravel2' | 'sampling' | 'fullTravel3' | 'dumping'
+  | 'emptyTravel1' | 'emptyWB' | 'emptyTravel2'
+
+const CYCLE_ORDER: CycleState[] = ['spot', 'waiting', 'loading', 'fullTravel1', 'fullWB',
+  'fullTravel2', 'sampling', 'fullTravel3', 'dumping', 'emptyTravel1', 'emptyWB', 'emptyTravel2']
+
+/** Position of a state in the forward order, or -1 if unknown. */
+export function cycleRank(s: string): number {
+  const i = CYCLE_ORDER.indexOf(s as CycleState)
+  return i
+}
+
+export type Zone = 'loading' | 'waiting' | 'discovery' | 'outside' | 'unknown'
+
+export const ZONE_RANK: Record<Zone, number> =
+  { loading: 3, waiting: 2, discovery: 1, outside: 0, unknown: -1 }
+
+/** Great-circle distance in metres. Verbatim port of dispatch_service.haversine_m. */
+export function haversineM(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000.0
+  const dlat = (bLat - aLat) * Math.PI / 180
+  const dlng = (bLng - aLng) * Math.PI / 180
+  const s = Math.sin(dlat / 2) ** 2
+    + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dlng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(s))
+}
+
+/** Innermost-ring-wins band classifier. Verbatim port of dispatch_service.zone_for. */
+export function zoneFor(distM: number | null, loadingM: number, waitingM: number,
+                        discoveryM: number | null = null): Zone {
+  if (distM == null) return 'unknown'
+  if (distM <= loadingM) return 'loading'
+  if (distM <= waitingM) return 'waiting'
+  if (discoveryM != null && distM <= discoveryM) return 'discovery'
+  return 'outside'
+}
+
+export interface CycleGeo {
+  excLat?: number | null; excLng?: number | null
+  dumpLat?: number | null; dumpLng?: number | null
+  loadingZoneM?: number; waitingZoneM?: number; discoveryZoneM?: number; dumpZoneM?: number
+}
+
+export interface DeviceFix { lat: number; lng: number; ts: number; heading?: number | null }
+
+// One transition the engine raises — maps to an offline-outbox action.
+export interface CycleEvent {
+  kind: 'zone_event' | 'cycle_advance'
+  plan_id: number | null
+  truck_no: string
+  excavator_no?: string | null
+  // zone_event:
+  zone_type?: 'discovery' | 'waiting' | 'loading' | 'dump'
+  event_type?: 'enter' | 'exit'
+  // cycle_advance:
+  status?: CycleState
+  distance_m?: number | null
+  ts: number
+}
+
+export interface EngineResult {
+  next: CycleState
+  events: CycleEvent[]   // the SAME transitions the server would raise
+  reason: 'gps' | 'noop'
+}
+
+/**
+ * Compute the forward-only cycle transition for a truck from a single device GPS
+ * fix, OFFLINE. Mirrors the server's deliberately-conservative GPS scope
+ * (auto_advance_cycle): GPS only drives POST-LOAD dump legs + inbound arrival at
+ * the shovel. spot↔loading and the weighbridge/sampling checkpoints stay on the
+ * manual button (the server never GPS-drives them either). Solo-safe: it only
+ * ever produces 'waiting' on arrival, never 'spot' (peer arbitration is the
+ * server's job; it re-arbitrates spot on reconnect).
+ */
+export function advanceOffline(
+  cur: CycleState,
+  fix: DeviceFix,
+  geo: CycleGeo,
+  ctx: { plan_id: number | null; truck_no: string; excavator_no?: string | null },
+): EngineResult {
+  const lz = geo.loadingZoneM ?? 10
+  const wz = geo.waitingZoneM ?? 20
+  const dvz = geo.discoveryZoneM ?? 100
+  const dz = geo.dumpZoneM ?? 50
+  const ev: CycleEvent[] = []
+  const mk = (e: Partial<CycleEvent>): CycleEvent => ({
+    plan_id: ctx.plan_id, truck_no: ctx.truck_no, excavator_no: ctx.excavator_no,
+    ts: fix.ts, ...e,
+  } as CycleEvent)
+
+  const distExc = (geo.excLat != null && geo.excLng != null)
+    ? haversineM(fix.lat, fix.lng, geo.excLat, geo.excLng) : null
+  const distDump = (geo.dumpLat != null && geo.dumpLng != null)
+    ? haversineM(fix.lat, fix.lng, geo.dumpLat, geo.dumpLng) : null
+
+  let next = cur
+
+  // INBOUND (empty / pre-arrival): emptyTravel2 → arrive at shovel → waiting.
+  // Discovery-ring crossing fires the "Reporting" zone event; entering the
+  // waiting/loading ring advances the local state to 'waiting' (never 'spot').
+  if (cur === 'emptyTravel2' || cur === 'waiting') {
+    const z = zoneFor(distExc, lz, wz, dvz)
+    if (cur === 'emptyTravel2') {
+      if (z === 'discovery') {
+        ev.push(mk({ kind: 'zone_event', zone_type: 'discovery', event_type: 'enter' }))
+      } else if (z === 'waiting' || z === 'loading') {
+        next = 'waiting'
+        ev.push(mk({ kind: 'zone_event', zone_type: z, event_type: 'enter' }))
+      }
+    }
+  }
+  // POST-LOAD dump leg — the EXACT server auto-advance scope. The cycle_advance
+  // to dumping/emptyTravel1 already records the dump zone enter/exit server-side,
+  // so we don't raise a separate zone_event here (avoids a double audit row).
+  else if (cur === 'fullTravel1' && distDump != null && distDump <= dz) {
+    next = 'dumping'
+    ev.push(mk({ kind: 'cycle_advance', status: 'dumping', distance_m: distDump }))
+  }
+  else if (cur === 'dumping' && distDump != null && distDump > dz) {
+    next = 'emptyTravel1'
+    ev.push(mk({ kind: 'cycle_advance', status: 'emptyTravel1', distance_m: distDump }))
+  }
+
+  // FORWARD-ONLY clamp: never emit a lower-ranked state — EXCEPT the intended
+  // cycle-boundary wrap emptyTravel2 → waiting (rank 11 → 1), which starts the
+  // next haul cycle. Every other backwards move is GPS jitter and is dropped.
+  const isCycleWrap = cur === 'emptyTravel2' && next === 'waiting'
+  if (!isCycleWrap && cycleRank(next) < cycleRank(cur)) { next = cur; ev.length = 0 }
+  return { next, events: ev, reason: ev.length ? 'gps' : 'noop' }
+}

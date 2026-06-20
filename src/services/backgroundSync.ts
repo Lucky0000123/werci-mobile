@@ -358,6 +358,52 @@ export async function submitDispatchAction(args: {
 }
 
 /**
+ * Submit a GPS-engine cycle transition (raised by the offline cycle engine).
+ * Maps the engine's CycleEvent to the right endpoint + outbox action kind:
+ *   - cycle_advance  → POST /api/dispatch/cycle-advance
+ *   - zone_event     → POST /api/dispatch/zone-events
+ * Routed through submitDispatchAction so it inherits the same online/offline +
+ * idempotency behaviour as the manual taps. scopeKey = truck_no so it stays in
+ * the same per-truck FIFO lane as the driver's manual actions.
+ */
+export async function submitCycleEvent(ev: {
+  kind: 'cycle_advance' | 'zone_event'
+  plan_id: number | null
+  truck_no: string
+  excavator_no?: string | null
+  status?: string
+  zone_type?: string
+  event_type?: string
+  distance_m?: number | null
+}): Promise<DispatchSubmitResult> {
+  if (ev.kind === 'cycle_advance') {
+    return submitDispatchAction({
+      kind: 'cycle_advance',
+      endpoint: '/api/dispatch/cycle-advance',
+      scopeKey: ev.truck_no,
+      payload: {
+        plan_id: ev.plan_id, truck_no: ev.truck_no, status: ev.status,
+        excavator_no: ev.excavator_no, distance_m: ev.distance_m,
+      },
+      expectedState: ev.status,
+    })
+  }
+  // zone_event → /api/dispatch/zone-events. Reuse the loading_start kind slot for
+  // outbox typing isn't right; zone events get their own ephemeral handling via
+  // submitDispatchAction with a dedicated endpoint. We tag the kind as
+  // 'cycle_advance' for outbox typing but the endpoint determines the behaviour.
+  return submitDispatchAction({
+    kind: 'cycle_advance',           // outbox kind is endpoint-driven; FIFO by truck
+    endpoint: '/api/dispatch/zone-events',
+    scopeKey: ev.truck_no,
+    payload: {
+      plan_id: ev.plan_id, truck_no: ev.truck_no, excavator_no: ev.excavator_no,
+      zone_type: ev.zone_type, event_type: ev.event_type, distance_m: ev.distance_m,
+    },
+  })
+}
+
+/**
  * Replay queued dispatch actions when back online. Per-SCOPE FIFO: actions for
  * one truck replay in clientSeq order and the scope STOPS on the first failure
  * (so a later advance never lands before an earlier one). Other scopes drain
