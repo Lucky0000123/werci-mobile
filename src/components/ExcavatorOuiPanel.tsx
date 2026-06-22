@@ -239,16 +239,27 @@ export default function ExcavatorOuiPanel({
   const queue = trucks.filter((t) => t.state !== 'loading')
   const nextNo = view?.excavator?.next_truck_no
   const planId = view?.excavator?.plan_id
-  const excSt = view?.excavator?.exc_status
+  // With an active plan, an idle/standby excavator is really WAITING for the
+  // next First Bucket — map idle→waiting so the header pill never reads
+  // "Standby" mid-plan. The server normally sends loading|waiting; this is the
+  // defensive fallback for the idle case (we still render the server status
+  // verbatim for loading/waiting).
+  const rawExcSt = view?.excavator?.exc_status
+  const mapIdleToWaiting = rawExcSt === 'idle' && !!view?.has_plan
+  const excSt = mapIdleToWaiting ? 'waiting' : rawExcSt
   const excStyle = excSt ? EXC_STYLE[excSt] : undefined
 
   const nonOp = manual && manual.status !== 'operating'
   const headColor = nonOp
     ? (MANUAL.find((m) => m.value === manual!.status)?.color || P.muted)
-    : (view?.excavator?.exc_status_color || excStyle?.color || P.muted)
+    : (mapIdleToWaiting
+        ? (excStyle?.color || P.muted)
+        : (view?.excavator?.exc_status_color || excStyle?.color || P.muted))
   const headLabel = nonOp
     ? dt('ms_' + manual!.status)
-    : (view?.excavator?.exc_status_label || excStyle?.label || excSt || '—')
+    : (mapIdleToWaiting
+        ? (excStyle?.label || '—')
+        : (view?.excavator?.exc_status_label || excStyle?.label || excSt || '—'))
 
   // Loading timer — runs from First Bucket. Anchor the server's time_in_state_s
   // to a local wall-clock baseline so the counter ticks every second smoothly
@@ -266,6 +277,13 @@ export default function ExcavatorOuiPanel({
   }
 
   useEffect(() => {
+    // Reset per-truck transient state whenever the truck under the bucket
+    // changes (Truck 1 kickout → Truck 2 First Bucket → Truck 3 …) or clears.
+    // Drops the previous truck's FULL-confirmation message so stale "✓ DT-1 …"
+    // text never lingers over a new/empty NOW LOADING strip. The load timer
+    // re-anchors above on the same truck_no change, so the displayed elapsed
+    // always belongs to the CURRENT truck, never the previous one.
+    setMsg('')
     if (!loadingTruck) return
     const id = setInterval(() => setTick((n) => n + 1), 1000)
     return () => clearInterval(id)
@@ -286,7 +304,11 @@ export default function ExcavatorOuiPanel({
         body: JSON.stringify({ plan_id: planId, truck_no: loadingTruck.truck_no, excavator_no: excavatorNo }),
       })
       const d = await r.json()
-      setMsg(r.ok && d.success ? `✓ ${fmtTruck(loadingTruck.truck_no)} → Full Travel 1` : (d.message || 'Finish failed'))
+      // Excavator panel = LOADING CONTROL ONLY. After kickout we confirm the
+      // load is done but NEVER surface the truck's post-load TRAVEL state
+      // (no "Full Travel 1" etc.) — that's haul-cycle info, not the operator's
+      // concern. Neutral "loaded" confirmation only.
+      setMsg(r.ok && d.success ? `✓ ${fmtTruck(loadingTruck.truck_no)} ${dt('departed')}` : (d.message || 'Finish failed'))
     } catch {
       setMsg('Network error')
     } finally {
@@ -399,15 +421,15 @@ export default function ExcavatorOuiPanel({
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
               }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ color: loadingTruck ? P.loading : P.sub, fontSize: '0.56rem', fontWeight: 900, letterSpacing: '0.1em' }}>
-                    {dt('now_loading').toUpperCase()}
+                  <div style={{ color: loadingTruck ? P.loading : P.waiting, fontSize: '0.56rem', fontWeight: 900, letterSpacing: '0.1em' }}>
+                    {(loadingTruck ? dt('now_loading') : dt('zone_waiting')).toUpperCase()}
                   </div>
                   {loadingTruck ? (
                     <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: '1.7rem', fontWeight: 900, lineHeight: 1.05, color: P.ink }}>
                       {fmtTruck(loadingTruck.truck_no)}
                     </div>
                   ) : (
-                    <div style={{ color: P.ink, fontWeight: 800, fontSize: '0.92rem', marginTop: 2 }}>⏳ {dt('waiting_first_bucket')}</div>
+                    <div style={{ color: P.sub, fontWeight: 700, fontSize: '0.82rem', marginTop: 2 }}>⏳ {dt('waiting_first_bucket')}</div>
                   )}
                 </div>
                 {loadingTruck && (
