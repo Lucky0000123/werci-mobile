@@ -7,6 +7,9 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.42.0 — In-cab OUI header re-branded from "PRISM FMS" to "WBN FMS". (Pairs
+ *          with the web v27 KIMPER licence gate: NO_KIMPER / EXPIRED / NO_DATE
+ *          now hard-block a pairing server-side, so this APK already enforces it.)
  * 2.41.0 — In-cab OUI fits one frame + language on every OUI screen. (1) The
  *          in-cab top bar (shared by BOTH the excavator and truck OUI) now
  *          carries the 🇮🇩/🇬🇧/🇨🇳 language switcher, so language is changeable
@@ -344,4 +347,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.41.0'
+export const APP_VERSION = '2.42.0'

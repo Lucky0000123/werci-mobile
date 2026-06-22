@@ -474,7 +474,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         <img src={prismLogo} alt="PRISM" style={{ height: 34, width: 'auto' }} />
         <div style={{ minWidth: 0, lineHeight: 1.15 }}>
           <div style={{ fontWeight: 800, fontSize: '0.98rem', letterSpacing: '-0.01em' }}>
-            PRISM <span style={{ color: F.gold }}>FMS</span>
+            WBN <span style={{ color: F.gold }}>FMS</span>
           </div>
           <div style={{ color: F.sub, fontSize: '0.72rem', fontWeight: 600 }}>Fleet Management · In-Cab Dispatch</div>
         </div>
