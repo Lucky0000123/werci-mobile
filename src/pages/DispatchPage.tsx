@@ -12,7 +12,7 @@
 // status names / colours / labels come from the server board legend, which
 // mirrors the prototype exactly. Manual statuses (delay / standby / breakdown /
 // maintenance) post to /api/dispatch/equipment-status and never break the cycle.
-import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo, lazy, Suspense } from 'react'
 import { apiFetch } from '../services/api'
 import { submitDispatchAction, submitCycleEvent } from '../services/backgroundSync'
 import { DispatchOutbox } from '../services/dispatchOutbox'
@@ -21,7 +21,11 @@ import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { useDispatchT } from '../services/dispatchI18n'
 import { useI18n, type Language } from '../services/i18n-context'
-import NavMap from '../components/NavMap'
+// NavMap pulls in MapLibre GL + Leaflet (~930 KB) — ~92% of this screen's JS
+// chunk — and is ONLY needed by a connected truck driver who opens the MAP view.
+// Lazy-load it so the FMS sign-on, the employee card, and the excavator OUI (no
+// map at all) never pay the map-engine parse cost on a low-end cab tablet.
+const NavMap = lazy(() => import('../components/NavMap'))
 import { TruckStatusPanel } from '../components/TruckStatusPanel'
 import ExcavatorOuiPanel from '../components/ExcavatorOuiPanel'
 import type { Assignment, StatusState } from '../components/TruckStatusPanel'
@@ -60,6 +64,37 @@ type UnitSuggestion = {
 }
 
 const SUPPORTED_TYPES = ['excavator', 'dump_truck']
+
+/**
+ * setInterval that PAUSES while the tab/app is backgrounded and resumes (with an
+ * immediate catch-up tick) when it becomes visible again. The in-cab OUI runs
+ * several polls (operator-view, GPS, outbox, telemetry, route); on a parked/
+ * asleep cab tablet they would otherwise keep waking the radio + CPU every few
+ * seconds and drain the battery. Returns a cleanup function.
+ */
+function visibleInterval(fn: () => void, ms: number): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null
+  const start = () => { if (timer == null) timer = setInterval(fn, ms) }
+  const stop = () => { if (timer != null) { clearInterval(timer); timer = null } }
+  const onVis = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      stop()
+    } else {
+      fn()        // catch up immediately on resume
+      start()
+    }
+  }
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    // start paused
+  } else {
+    start()
+  }
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis)
+  return () => {
+    stop()
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis)
+  }
+}
 
 const WARN_LABELS: Record<string, string> = {
   kimper_expired: 'KIMPER EXPIRED',
@@ -823,8 +858,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
         .catch(() => { /* location share unavailable */ })
     }
     poll()
-    const h = setInterval(poll, 5000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(poll, 5000)
+    return () => { alive = false; stop() }
   }, [])
 
   // OFFLINE CYCLE ENGINE. When the cab is offline (and we have a device fix +
@@ -898,8 +933,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       } catch { if (alive) setErr('network error') }
     }
     tick()
-    const h = setInterval(tick, 5000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(tick, 5000)
+    return () => { alive = false; stop() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId])
 
@@ -914,8 +949,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
         .catch(() => { /* outbox unavailable */ })
     }
     poll()
-    const h = setInterval(poll, 3000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(poll, 3000)
+    return () => { alive = false; stop() }
   }, [truckNo])
 
   // Live telemetry (position / speed / heading) from the TMS resolver.
@@ -931,8 +966,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       } catch { /* offline */ }
     }
     pull()
-    const h = setInterval(pull, 5000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(pull, 5000)
+    return () => { alive = false; stop() }
   }, [truckNo])
 
   // Best-effort haul-road lanes overlay (lights up once the backend ships it).
@@ -1063,8 +1098,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       } catch { if (alive) { setRoutePts(null); setRouteSegments(null) } }
     }
     fetchRoute()
-    const h = setInterval(fetchRoute, 15000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(fetchRoute, 15000)
+    return () => { alive = false; stop() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dest?.lat, dest?.lng])
 
@@ -1172,9 +1207,13 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                   pointerEvents: viewMode === 'map' ? 'auto' : 'none', zIndex: viewMode === 'map' ? 1 : 0,
                   transition: 'opacity 0.12s ease',
                 }}>
-                  <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                          destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
-                          height="100%" visible={viewMode === 'map'} />
+                  <Suspense fallback={<div style={{ position: 'absolute', inset: 0, background: D.panel2,
+                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                 color: D.sub, fontSize: '0.82rem', fontWeight: 700 }}>{dt('loading') || 'Loading map…'}</div>}>
+                    <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
+                            destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
+                            height="100%" visible={viewMode === 'map'} />
+                  </Suspense>
                 </div>
                 {viewMode === 'map' && speedKph != null && (
                   <div style={{ position: 'absolute', left: 12, bottom: 12, zIndex: 500, background: 'rgba(8,12,20,0.78)',

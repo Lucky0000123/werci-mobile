@@ -4,6 +4,24 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../services/api'
 import { useDispatchT } from '../services/dispatchI18n'
 
+/**
+ * setInterval that pauses while the app is backgrounded (cab tablet asleep) and
+ * resumes with an immediate catch-up tick. Keeps the 2s queue-board poll from
+ * hammering the radio/CPU when nobody is looking. Returns a cleanup function.
+ */
+function visibleInterval(fn: () => void, ms: number): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null
+  const start = () => { if (timer == null) timer = setInterval(fn, ms) }
+  const stop = () => { if (timer != null) { clearInterval(timer); timer = null } }
+  const onVis = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') stop()
+    else { fn(); start() }
+  }
+  if (!(typeof document !== 'undefined' && document.visibilityState === 'hidden')) start()
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis)
+  return () => { stop(); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis) }
+}
+
 const P = {
   shell: '#0f0f0f',
   panel: '#101010',
@@ -191,8 +209,8 @@ export default function ExcavatorOuiPanel({
       }
     }
     poll()
-    const h = setInterval(poll, 2000)
-    return () => { alive = false; clearInterval(h) }
+    const stop = visibleInterval(poll, 2000)
+    return () => { alive = false; stop() }
   }, [employeeId])
 
   useEffect(() => {

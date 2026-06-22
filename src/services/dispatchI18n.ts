@@ -3,6 +3,7 @@
 // (whose Record<Language, Dict> type forces full key parity across en/id/zh).
 // Here zh/es fall back to English automatically via dtFor(). Add a language by
 // filling its map; missing keys fall back to English.
+import { useMemo } from 'react'
 import type { Language } from './i18n'
 import { useI18n } from './i18n-context'
 
@@ -379,7 +380,11 @@ export function dtFor(language: Language) {
 }
 
 // Hook: a `dt(key)` bound to the app's current language (reacts to changes).
+// Memoized on `language` so the returned translator is referentially stable
+// across re-renders — otherwise a fresh closure every render would defeat the
+// React.memo boundaries on the hot in-cab panels (they re-render on every
+// 2-5s poll tick when `dt` changes identity).
 export function useDispatchT() {
   const { language } = useI18n()
-  return dtFor(language)
+  return useMemo(() => dtFor(language), [language])
 }

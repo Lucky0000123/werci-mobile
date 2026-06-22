@@ -7,6 +7,16 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.44.0 — In-cab OUI speed pass. (1) MapLibre GL + Leaflet (~966 KB, ~92% of
+ *          the dispatch screen's JS) are now LAZY-loaded only when a connected
+ *          truck driver opens the MAP view — the FMS sign-on, employee card and
+ *          excavator OUI (no map) no longer parse the map engines at all. The
+ *          in-cab entry chunk drops from ~285 KB to ~18 KB gzip. (2) All in-cab
+ *          polls (operator-view, GPS, outbox, telemetry, route, excavator queue)
+ *          now PAUSE while the app is backgrounded and catch up on resume, so a
+ *          parked/asleep cab tablet stops waking the radio/CPU every few seconds.
+ *          (3) The dispatch translator is memoized so the hot panels stop
+ *          re-rendering on every poll tick.
  * 2.43.0 — OUI field-test fixes. (1) Truck OUI: after a manual non-operating
  *          status (breakdown/standby/delay/maintenance) the only way back to the
  *          cycle was unreachable; added a direct "Return to Operating" button in
@@ -356,4 +366,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.43.0'
+export const APP_VERSION = '2.44.0'
