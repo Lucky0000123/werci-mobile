@@ -278,7 +278,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     try { cached = await buildOfflineProfile(id) } catch { /* cache unavailable */ }
     if (cached) { setProfile(cached as unknown as Profile); setProfileOffline(true) }
     try {
-      const r = await apiFetch(`/api/dispatch/lookup?employee_id=${encodeURIComponent(id)}`)
+      const r = await apiFetch(`/api/dispatch/lookup?employee_id=${encodeURIComponent(id)}`, {}, { timeout: 45000 })
       const data = await r.json()
       if (r.ok && data.success) { setProfile(data.profile as Profile); setProfileOffline(false) }
       else if (!cached) setError(data.message || `Employee ${id} not found in Kimper`)
@@ -340,7 +340,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
       if (!t || !CONNECT_TYPES.includes(t)) {
         // detect from the live feed / asset map
         try {
-          const rr = await apiFetch(`/api/dispatch/resolve-unit?unit_no=${encodeURIComponent(u)}`)
+          const rr = await apiFetch(`/api/dispatch/resolve-unit?unit_no=${encodeURIComponent(u)}`, {}, { timeout: 45000 })
           const rd = await rr.json()
           t = rd?.tms?.asset_type || null
         } catch { /* offline / unknown */ }
@@ -364,7 +364,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
       const r = await apiFetch(path, {
         method: 'POST',
         body: JSON.stringify(payload),
-      })
+      }, { timeout: 45000 })   // connect is a one-time user action; tolerate a
+                               // slow server (e.g. a concurrent workforce sync)
+                               // rather than show a false "couldn't reach server"
       const data = await r.json() as ConnectResult
       if (r.status === 403 && data.authorized === false) {
         setError(data.message || dt('not_authorized'))

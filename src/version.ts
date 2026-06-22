@@ -7,6 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.47.0 — Connect reliability. The identify, resolve-unit and connect calls now
+ *          use a 45s timeout (was the default 15s). During a concurrent server
+ *          workforce sync (/people/delta) the connect can take ~30-40s; the old
+ *          15s timeout aborted it and showed a false "could not reach the server"
+ *          even though the pairing actually succeeded. These are one-time user
+ *          actions, so waiting beats a false error.
  * 2.46.0 — App-only equipment polish + web visibility. (1) The connect dropdown
  *          now colour-codes each fleet family — excavator (teal), dump truck
  *          (blue), app-only ancillary gear (amber) — and the Equipment OUI header
@@ -385,4 +391,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.46.0'
+export const APP_VERSION = '2.47.0'
