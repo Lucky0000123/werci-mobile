@@ -848,9 +848,6 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
   const [routeSegments, setRouteSegments] = useState<{ lane: string; coordinates: [number, number][] }[] | null>(null)
-  // Wrong-way: truck driving AGAINST the lane arrows (direction is the hard rule;
-  // cargo is irrelevant). Populated by polling /api/dispatch/heading-check.
-  const [wrongWay, setWrongWay] = useState<boolean>(false)
   const [otherLoading, setOtherLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
@@ -1214,34 +1211,6 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dest?.lat, dest?.lng])
 
-  // Wrong-way watch: poll the server with the truck's live position + GPS heading
-  // and flag when it's pointing AGAINST the mandated lane arrows. Direction is the
-  // only thing checked here (cargo is irrelevant). Only meaningful with a heading
-  // and a non-trivial speed (a parked/creeping truck has a noisy course), so we
-  // gate on speed to avoid false "Wrong Way" alarms while spotting/queuing.
-  const wwRef = useRef<{ lat: number; lng: number; course?: number | null } | null>(null)
-  wwRef.current = truckPt
-  const wwSpeedRef = useRef<number | null>(speedKph)
-  wwSpeedRef.current = speedKph
-  useEffect(() => {
-    let alive = true
-    async function checkHeading() {
-      const p = wwRef.current
-      const spd = wwSpeedRef.current
-      // need a position, a real heading, and actual motion (> 3 km/h)
-      if (!p || p.course == null || spd == null || spd < 3) { if (alive) setWrongWay(false); return }
-      try {
-        const r = await apiFetch(`/api/dispatch/heading-check?lat=${p.lat}&lng=${p.lng}&heading=${p.course}`)
-        const d = await r.json()
-        if (alive) setWrongWay(!!(d && d.on_road && d.wrong_way))
-      } catch { if (alive) setWrongWay(false) }
-    }
-    checkHeading()
-    const stop = visibleInterval(checkHeading, 5000)
-    return () => { alive = false; stop() }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const [shiftDate, setShiftDateRaw] = useState<string>('—')
   const setShiftDate = useCallback((shift?: string | null, planDate?: string | null) => {
     const parts: string[] = []
@@ -1366,21 +1335,12 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                     — deliberately NOT drawn on the driver map nor shown as a legend.
                     The server still classifies the truck's zone; the only driver-
                     facing cue is the Reporting/Departed banner below. */}
-                {/* WRONG WAY alert — the truck is driving AGAINST the lane arrows.
-                    Direction is the hard rule (cargo is irrelevant), so this is the
-                    most urgent driver cue: full-width, top-centre, pulsing red. */}
-                {viewMode === 'map' && wrongWay && (
-                  <div style={{ position: 'absolute', left: 0, right: 0, top: 0, zIndex: 600,
-                                background: 'rgba(220,38,38,0.92)', padding: '10px 12px',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                                boxShadow: '0 2px 10px rgba(0,0,0,.5)', animation: 'wwpulse 1s ease-in-out infinite' }}>
-                    <style>{`@keyframes wwpulse { 0%,100% { background:rgba(220,38,38,0.92); } 50% { background:rgba(127,29,29,0.92); } }`}</style>
-                    <span style={{ fontSize: '1.2rem' }}>⛔</span>
-                    <span style={{ color: '#fff', fontWeight: 900, fontSize: '0.95rem', letterSpacing: '0.06em' }}>
-                      {dt('wrong_way') || 'WRONG WAY — turn around, follow the arrows'}
-                    </span>
-                  </div>
-                )}
+                {/* NOTE: there is intentionally NO driver "wrong way" alert. On a
+                    dedicated one-way haul road the driver physically CANNOT travel
+                    against traffic, so a per-truck alarm would almost always be a
+                    false alarm caused by a lane's arrow being drawn backwards on the
+                    map — a DISPATCHER map-QA issue (flip the arrow in the Road
+                    Network editor), not something to nag the driver about. */}
                 {/* Approach / departure cue banner (Reporting → Loaded/Departed). */}
                 {viewMode === 'map' && (truck?.reporting || truck?.departed) && (
                   <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 500,
