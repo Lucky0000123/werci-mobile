@@ -169,6 +169,22 @@ const EN: Dict = {
   ms_standby: 'Standby',
   ms_breakdown: 'Breakdown / Down',
   ms_maintenance: 'Maintenance',
+  // ── radio (PRISM Radio / Mumble PTT) ──
+  radio: 'Radio',
+  radio_title: 'PRISM Radio',
+  radio_channel: 'Talk group',
+  radio_select_channel: 'Select a talk group',
+  radio_ptt_hold: 'HOLD TO TALK',
+  radio_ptt_release: 'RELEASE TO STOP',
+  radio_connecting: 'Connecting to radio\u2026',
+  radio_transmitting: 'Transmitting\u2026',
+  radio_receiving: 'Receiving\u2026',
+  radio_idle: 'Ready',
+  radio_offline: 'Radio offline',
+  radio_offline_hint: 'Voice unavailable. Dispatch keeps working as normal.',
+  radio_no_channel: 'No talk groups available yet.',
+  radio_close: 'Close',
+  radio_retry: 'Retry',
 }
 
 const ID: Dict = {
@@ -323,6 +339,22 @@ const ID: Dict = {
   ms_standby: 'Siaga',
   ms_breakdown: 'Rusak / Mati',
   ms_maintenance: 'Perawatan',
+  // ── radio ──
+  radio: 'Radio',
+  radio_title: 'PRISM Radio',
+  radio_channel: 'Grup bicara',
+  radio_select_channel: 'Pilih grup bicara',
+  radio_ptt_hold: 'TEKAN UNTUK BICARA',
+  radio_ptt_release: 'LEPAS UNTUK BERHENTI',
+  radio_connecting: 'Menyambungkan radio\u2026',
+  radio_transmitting: 'Mengirim\u2026',
+  radio_receiving: 'Menerima\u2026',
+  radio_idle: 'Siap',
+  radio_offline: 'Radio mati',
+  radio_offline_hint: 'Suara tidak tersedia. Dispatch tetap berjalan normal.',
+  radio_no_channel: 'Belum ada grup bicara.',
+  radio_close: 'Tutup',
+  radio_retry: 'Coba lagi',
 }
 
 const ZH: Dict = {
@@ -477,6 +509,22 @@ const ZH: Dict = {
   ms_standby: '待命',
   ms_breakdown: '故障 / 停机',
   ms_maintenance: '维护',
+  // ── radio ──
+  radio: '对讲',
+  radio_title: 'PRISM 对讲',
+  radio_channel: '通话组',
+  radio_select_channel: '选择通话组',
+  radio_ptt_hold: '按住通话',
+  radio_ptt_release: '松开停止',
+  radio_connecting: '正在连接对讲\u2026',
+  radio_transmitting: '发送中\u2026',
+  radio_receiving: '接收中\u2026',
+  radio_idle: '就绪',
+  radio_offline: '对讲离线',
+  radio_offline_hint: '语音不可用。调度照常运行。',
+  radio_no_channel: '暂无通话组。',
+  radio_close: '关闭',
+  radio_retry: '重试',
 }
 
 const DICTS: Record<Language, Dict> = { en: EN, id: ID, zh: ZH, es: {} }
