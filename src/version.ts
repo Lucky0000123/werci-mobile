@@ -7,6 +7,18 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.45.0 — App-only equipment sign-on. Ancillary/support units (grader, dozer,
+ *          compactor, loader, light vehicle, ...) have NO onboard TMS/GPS, so
+ *          they only exist in the FMS while an operator is signed on through the
+ *          OUI. The connect dropdown now offers these types and routes them to a
+ *          new lightweight /api/dispatch/connect-equipment session; the operator
+ *          gets a dedicated EQUIPMENT OUI whose whole job is to set/change the
+ *          manual status (delay/standby/breakdown/maintenance) with an always-
+ *          reachable "Return to Operating". The unit appears on the live map via
+ *          the existing OUI GPS overlay. Status persists to the same
+ *          PRISM_EQUIPMENT_STATUS_EVENTS used by trucks/excavators.
+ *          Also in 2.45.0: the cab map shows the assigned loading-location flag
+ *          beside the live shovel.
  * 2.44.0 — In-cab OUI speed pass. (1) MapLibre GL + Leaflet (~966 KB, ~92% of
  *          the dispatch screen's JS) are now LAZY-loaded only when a connected
  *          truck driver opens the MAP view — the FMS sign-on, employee card and
@@ -366,4 +378,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.44.0'
+export const APP_VERSION = '2.45.0'
