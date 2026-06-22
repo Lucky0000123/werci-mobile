@@ -7,6 +7,16 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.48.0 — Cab top-bar + map decluttered to ICONS, not sentences. (1) The
+ *          connect advisories that used to spell out a full line each ("Not on
+ *          KIMPER for this equipment", "Unit currently offline in GPS", ...) now
+ *          collapse to ONE small colour-coded icon cluster (KIMPER licence 🪪,
+ *          live-feed 📡, pairing 🔗, type mismatch ⚠) deduped by family; tap it
+ *          to reveal the full wording in a compact popover. Red dominates amber.
+ *          (2) New GPS-source map badge: a small glyph (not a text line) shows
+ *          where the truck position comes from -- 📡 the unit's onboard
+ *          equipment/TMS GPS, 📱 this tablet's own GPS, ⌛ a stale last-known fix
+ *          -- tap to reveal the label (Equipment GPS / Tablet GPS, en/id/zh).
  * 2.47.0 — Connect reliability. The identify, resolve-unit and connect calls now
  *          use a 45s timeout (was the default 15s). During a concurrent server
  *          workforce sync (/people/delta) the connect can take ~30-40s; the old
@@ -391,4 +401,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.47.0'
+export const APP_VERSION = '2.48.0'

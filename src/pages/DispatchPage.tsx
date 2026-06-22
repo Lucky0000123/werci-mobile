@@ -102,15 +102,21 @@ function visibleInterval(fn: () => void, ms: number): () => void {
   }
 }
 
-const WARN_LABELS: Record<string, string> = {
-  kimper_expired: 'KIMPER EXPIRED',
-  kimper_expiring_soon: 'KIMPER expiring soon',
-  kimper_no_date: 'KIMPER has no expiry date',
-  not_authorized_type: 'Not on KIMPER for this equipment',
-  unit_unknown: 'Unit not seen in live GPS yet (will link once it reports)',
-  unit_offline: 'Unit currently offline in GPS',
-  unit_type_mismatch: 'Entered unit type does not match the connect type',
-  unit_already_paired: 'Unit is already connected to another operator',
+// Connect-time advisories. Each carries a compact ICON (so the cab top bar shows
+// a small glyph, not a long sentence) + severity (red = hard/blocking-ish, amber
+// = advisory) + the full text revealed when the driver taps the icon cluster.
+// icon families: KIMPER licence (id badge), GPS/live-feed (satellite), pairing
+// (link), type mismatch (warning).
+type WarnMeta = { icon: string; sev: 'red' | 'amber'; full: string }
+const WARN_META: Record<string, WarnMeta> = {
+  kimper_expired:       { icon: '🪪', sev: 'red',   full: 'KIMPER expired' },
+  kimper_expiring_soon: { icon: '🪪', sev: 'amber', full: 'KIMPER expiring soon' },
+  kimper_no_date:       { icon: '🪪', sev: 'amber', full: 'KIMPER has no expiry date' },
+  not_authorized_type:  { icon: '🪪', sev: 'amber', full: 'Not on KIMPER for this equipment' },
+  unit_unknown:         { icon: '📡', sev: 'amber', full: 'Unit not seen in live GPS yet (will link once it reports)' },
+  unit_offline:         { icon: '📡', sev: 'amber', full: 'Unit currently offline in GPS' },
+  unit_type_mismatch:   { icon: '⚠️', sev: 'amber', full: 'Entered unit type does not match the connect type' },
+  unit_already_paired:  { icon: '🔗', sev: 'red',   full: 'Unit is already connected to another operator' },
 }
 
 // Light palette for the identify / connect steps (matches the rest of the app).
@@ -481,13 +487,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
               <span style={{ color: D.sub, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>ID {profile.employee_id}</span>
             </div>
             {connection.warnings.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, overflow: 'hidden' }}>
-                {[...connection.warnings]
-                  .sort((a, b) => (b.startsWith('kimper_expired') ? 1 : 0) - (a.startsWith('kimper_expired') ? 1 : 0))
-                  .slice(0, 3).map((w) => (
-                  <span key={w} style={chip(w.startsWith('kimper_expired') || w === 'unit_already_paired' ? C.red : C.amber)}>{WARN_LABELS[w] || w}</span>
-                ))}
-              </div>
+              <WarnIcons warnings={connection.warnings} />
             )}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               {/* Language switcher — must be reachable from EVERY in-cab screen
@@ -1151,6 +1151,16 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     : (tel?.lat != null && tel?.lng != null)
     ? { lat: tel.lat, lng: tel.lng, course: tel.course }
     : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
+  // Position-source for the small map badge (an ICON, not a whole sentence):
+  //  - 'tablet'    = this device's own GPS (offline local tracking)
+  //  - 'equipment' = the unit's onboard TMS/GPS via the server resolver
+  //  - 'last'      = stale last-server-known fix (no live source right now)
+  //  - null        = no position at all
+  const gpsSource: 'tablet' | 'equipment' | 'last' | null =
+    (!online && deviceFix) ? 'tablet'
+    : (tel?.lat != null && tel?.lng != null) ? 'equipment'
+    : (truck && truck.lat != null && truck.lng != null) ? 'last'
+    : null
   const speedKph = tel?.speed != null ? Math.max(0, Math.round(tel.speed)) : null
   const nextLocName = isFull ? (dumpLoc || dt('dump_loc')) : (loadingLoc || excavatorNo || dt('shovel'))
 
@@ -1330,6 +1340,13 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                     <span style={{ fontFamily: 'monospace', fontSize: '1.8rem', fontWeight: 900, color: speedKph > 0 ? '#86EFAC' : D.ink, lineHeight: 1 }}>{speedKph}</span>
                     <span style={{ color: D.sub, fontSize: '0.62rem', fontWeight: 700 }}>km/h</span>
                   </div>
+                )}
+                {/* GPS-SOURCE ICON — a small glyph (NOT a whole text line) telling
+                    the driver where the map position is coming from: 📡 = the unit's
+                    onboard equipment/TMS GPS, 📱 = this tablet's own GPS (offline
+                    local tracking), ⌛ = a stale last-known fix. */}
+                {viewMode === 'map' && gpsSource && (
+                  <GpsSourceBadge source={gpsSource} label={dt(`gps_src_${gpsSource}`)} />
                 )}
                 {/* Moving-geofence rings (Discovery/Waiting/Loading) are LOGIC ONLY
                     — deliberately NOT drawn on the driver map nor shown as a legend.
@@ -1806,4 +1823,85 @@ const ghostBtn: React.CSSProperties = {
 }
 function chip(color: string): React.CSSProperties {
   return { fontSize: '0.72rem', fontWeight: 700, color, background: `${color}1F`, border: `1px solid ${color}55`, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' }
+}
+
+// ── connect-advisory ICON CLUSTER ────────────────────────────────────────────
+// The cab top bar used to spell every connect advisory out as a full sentence
+// ("Not on KIMPER for this equipment", "Unit currently offline in GPS", ...),
+// which ran a whole line wide and crowded the bar. Instead show ONE small,
+// colour-coded icon per advisory (deduped by glyph so two KIMPER notes collapse
+// to a single 🪪). The driver taps the cluster to reveal the full wording in a
+// compact popover. Red dominates amber for the cluster tint; KIMPER sorts first.
+function WarnIcons({ warnings }: { warnings: string[] }) {
+  const [open, setOpen] = useState(false)
+  const metas = warnings
+    .map((w) => ({ key: w, meta: WARN_META[w] }))
+    .filter((x): x is { key: string; meta: WarnMeta } => !!x.meta)
+    .sort((a, b) => (b.meta.sev === 'red' ? 1 : 0) - (a.meta.sev === 'red' ? 1 : 0))
+  if (!metas.length) return null
+  const anyRed = metas.some((m) => m.meta.sev === 'red')
+  const tint = anyRed ? C.red : C.amber
+  // Dedupe the row by glyph so repeated families show a single icon; keep the
+  // worst severity per glyph for its colour.
+  const byIcon = new Map<string, 'red' | 'amber'>()
+  for (const m of metas) {
+    const prev = byIcon.get(m.meta.icon)
+    byIcon.set(m.meta.icon, prev === 'red' || m.meta.sev === 'red' ? 'red' : 'amber')
+  }
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-label="Connection advisories"
+              style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 8px', cursor: 'pointer',
+                       background: `${tint}1A`, border: `1px solid ${tint}66`, borderRadius: 999 }}>
+        {[...byIcon.entries()].map(([icon, sev]) => (
+          <span key={icon} style={{ fontSize: '0.92rem', lineHeight: 1,
+                                    filter: sev === 'red' ? 'none' : 'grayscale(0.15)' }}>{icon}</span>
+        ))}
+        <span style={{ width: 6, height: 6, borderRadius: 999, background: tint,
+                       boxShadow: `0 0 6px ${tint}`, marginLeft: 1 }} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 41,
+                        background: F.panelHi, border: `1px solid ${F.line2}`, borderRadius: 12,
+                        boxShadow: '0 18px 40px rgba(0,0,0,0.6)', overflow: 'hidden',
+                        minWidth: 220, maxWidth: 280, padding: '6px 0' }}>
+            {metas.map(({ key, meta }) => {
+              const cc = meta.sev === 'red' ? C.red : C.amber
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 13px' }}>
+                  <span style={{ fontSize: '1rem', lineHeight: 1.1, flexShrink: 0 }}>{meta.icon}</span>
+                  <span style={{ color: cc, fontSize: '0.8rem', fontWeight: 600, lineHeight: 1.3 }}>{meta.full}</span>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── GPS-SOURCE map badge ──────────────────────────────────────────────────────
+// A SMALL pill on the map showing where the truck's position comes from, as an
+// icon (not a sentence): 📡 onboard equipment/TMS GPS, 📱 this tablet's own GPS,
+// ⌛ a stale last-known fix. Tap to reveal the short label. Sits top-right so it
+// never collides with the bottom-left speed read-out or the top-left cue banner.
+function GpsSourceBadge({ source, label }: { source: 'tablet' | 'equipment' | 'last'; label: string }) {
+  const [open, setOpen] = useState(false)
+  const ICON: Record<string, string> = { equipment: '📡', tablet: '📱', last: '⌛' }
+  const TINT: Record<string, string> = { equipment: '#38BDF8', tablet: '#86EFAC', last: '#9ca3af' }
+  const tint = TINT[source]
+  return (
+    <div style={{ position: 'absolute', right: 12, top: 12, zIndex: 500 }}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-label={label}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                       background: 'rgba(8,12,20,0.78)', border: `1px solid ${tint}66`,
+                       borderRadius: 999, padding: open ? '5px 11px 5px 9px' : '5px 9px' }}>
+        <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>{ICON[source]}</span>
+        {open && <span style={{ color: tint, fontSize: '0.7rem', fontWeight: 800, whiteSpace: 'nowrap' }}>{label}</span>}
+      </button>
+    </div>
+  )
 }

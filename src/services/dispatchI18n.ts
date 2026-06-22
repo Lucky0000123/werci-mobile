@@ -116,6 +116,10 @@ const EN: Dict = {
   dump_travel_empty: 'Travel Empty — heading back to the shovel',
   not_at_dump: 'Move inside the dump area to finish dumping',
   dump_already_done: 'Dumping already completed',
+  // ── GPS position-source (map icon labels) ──
+  gps_src_equipment: 'Equipment GPS',
+  gps_src_tablet: 'Tablet GPS',
+  gps_src_last: 'Last known position',
   // ── driver primary action (per cycle state) ──
   drv_spot: 'Confirm Start Loading',
   drv_fullTravel1: 'Arrived — Full Weighbridge',
@@ -242,6 +246,10 @@ const ID: Dict = {
   dump_travel_empty: 'Perjalanan Kosong — kembali ke shovel',
   not_at_dump: 'Masuk ke area buang untuk menyelesaikan pembuangan',
   dump_already_done: 'Pembuangan sudah selesai',
+  // ── Sumber posisi GPS (label ikon peta) ──
+  gps_src_equipment: 'GPS Unit',
+  gps_src_tablet: 'GPS Tablet',
+  gps_src_last: 'Posisi terakhir',
   drv_spot: 'Konfirmasi Mulai Muat',
   drv_fullTravel1: 'Tiba — Jembatan Timbang (Isi)',
   drv_fullWB: 'Konfirmasi Timbang (Isi)',
@@ -366,6 +374,10 @@ const ZH: Dict = {
   dump_travel_empty: '空车返回 — 返回铲车',
   not_at_dump: '请进入卸载区以完成卸载',
   dump_already_done: '卸载已完成',
+  // ── GPS 位置来源（地图图标标签）──
+  gps_src_equipment: '设备 GPS',
+  gps_src_tablet: '平板 GPS',
+  gps_src_last: '最后已知位置',
   drv_spot: '确认开始装载',
   drv_fullTravel1: '到达 — 重车地磅',
   drv_fullWB: '确认重车地磅',
