@@ -84,10 +84,10 @@ describe('advanceOffline — post-load dump leg (the server GPS scope)', () => {
     expect(res.next).toBe('fullTravel1')
     expect(res.events).toHaveLength(0)
   })
-  it('dumping leaving the dump geofence → emptyTravel1', () => {
+  it('dumping leaving the dump geofence → STAYS dumping (handshake: completing the dump is the manual Finish Dumping tap, not GPS exit)', () => {
     const res = advanceOffline('dumping', awayFromDump, GEO, CTX)
-    expect(res.next).toBe('emptyTravel1')
-    expect(res.events[0]).toMatchObject({ kind: 'cycle_advance', status: 'emptyTravel1' })
+    expect(res.next).toBe('dumping')           // NO auto emptyTravel1
+    expect(res.events).toHaveLength(0)         // the server board handles revert-on-exit
   })
   it('dumping still at the dump → stays dumping', () => {
     const res = advanceOffline('dumping', atDump, GEO, CTX)

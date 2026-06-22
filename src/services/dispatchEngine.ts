@@ -274,15 +274,19 @@ export function advanceOffline(
     }
   }
   // POST-LOAD dump leg — the EXACT server auto-advance scope. The cycle_advance
-  // to dumping/emptyTravel1 already records the dump zone enter/exit server-side,
-  // so we don't raise a separate zone_event here (avoids a double audit row).
+  // to dumping already records the dump zone enter server-side, so we don't raise
+  // a separate zone_event here (avoids a double audit row).
+  //
+  // DUMPING HANDSHAKE: GPS only AUTO-ADVANCES the ARRIVAL (fullTravel1 ->
+  // dumping). It deliberately does NOT auto-complete dumping -> emptyTravel1:
+  // completing the dump is now the driver's manual "Finish Dumping" tap (POST
+  // /api/dispatch/finish-dumping), mirroring the server (auto_advance_cycle no
+  // longer auto-exits on GPS). A 'dumping' truck that leaves the dome WITHOUT
+  // tapping is reverted to Travel Full by the SERVER board poll on reconnect, so
+  // the offline engine raises no transition for the dump exit.
   else if (cur === 'fullTravel1' && distDump != null && distDump <= dz) {
     next = 'dumping'
     ev.push(mk({ kind: 'cycle_advance', status: 'dumping', distance_m: distDump }))
-  }
-  else if (cur === 'dumping' && distDump != null && distDump > dz) {
-    next = 'emptyTravel1'
-    ev.push(mk({ kind: 'cycle_advance', status: 'emptyTravel1', distance_m: distDump }))
   }
 
   // FORWARD-ONLY clamp: never emit a lower-ranked state — EXCEPT the intended

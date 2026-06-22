@@ -29,6 +29,10 @@ export interface DispatchMapProps {
   lane: 'full' | 'empty'
   destKind?: 'loading' | 'dump'
   stateColor?: string
+  // Dumping-scenario: when the truck is Arrived at Dump (state==dumping) the
+  // vehicle marker becomes a tilting-truck-bed "dumping" glyph instead of the
+  // plain heading arrow, so the dispatcher/driver sees the discharge at a glance.
+  dumping?: boolean
   route?: [number, number][] | null          // [lat,lng] along the haul roads (fallback line)
   routeSegments?: { lane: string; coordinates: [number, number][] }[] | null  // [lng,lat] loaded/empty
   roads?: GeoJSON.FeatureCollection | null    // optional empty/full lane overlay
@@ -43,8 +47,31 @@ export interface DispatchMapProps {
 
 const NAV_ZOOM = 16
 
+// Tilting-truck-bed "DUMPING" glyph (raised bed pivoting at the cab, with falling
+// material) used while the truck is Arrived at Dump. Drawn upright (not heading-
+// rotated) so the tipping motion reads clearly. `color` follows the cycle state.
+export function dumpBedSvg(color: string, size = 34): string {
+  return (
+    `<svg width="${size}" height="${size}" viewBox="0 0 34 34" fill="none" ` +
+    `style="filter:drop-shadow(0 1px 3px rgba(0,0,0,.75));">` +
+    // chassis + wheels
+    `<rect x="4" y="22" width="24" height="4" rx="1.4" fill="${color}"/>` +
+    `<circle cx="10" cy="28" r="2.6" fill="#111827" stroke="${color}" stroke-width="1.4"/>` +
+    `<circle cx="22" cy="28" r="2.6" fill="#111827" stroke="${color}" stroke-width="1.4"/>` +
+    // cab
+    `<rect x="22" y="15" width="6" height="7" rx="1.2" fill="${color}"/>` +
+    // raised (tilting) bed — pivoted at the rear, tipping its load out the back
+    `<path d="M5 21 L25 21 L13 9 L3 12 Z" fill="${color}" stroke="#0a0e14" stroke-width="0.8"/>` +
+    // falling material
+    `<circle cx="4.5" cy="16" r="1.1" fill="#fbbf24"/>` +
+    `<circle cx="3" cy="19.5" r="1.0" fill="#fbbf24"/>` +
+    `<circle cx="6" cy="20" r="0.9" fill="#fbbf24"/>` +
+    `</svg>`
+  )
+}
+
 function DispatchMap({
-  truck, dest, loadingDest, loadingLabel, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, rings, height = 260, visible,
+  truck, dest, loadingDest, loadingLabel, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', dumping = false, route, roads, rings, height = 260, visible,
 }: DispatchMapProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
@@ -115,11 +142,15 @@ function DispatchMap({
     const ls = layers.current
 
     if (truck && isFinite(truck.lat) && isFinite(truck.lng)) {
-      const html =
-        `<div style="transform:rotate(${truck.course ?? 0}deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;">` +
-        `<div style="width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;` +
-        `border-bottom:22px solid ${stateColor};filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));"></div></div>`
-      const icon = L.divIcon({ html, className: '', iconSize: [30, 30], iconAnchor: [15, 15] })
+      // While Arrived at Dump, show the tilting-truck-bed dumping glyph (upright,
+      // not heading-rotated). Otherwise the heading-aware arrow.
+      const html = dumping
+        ? `<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;">${dumpBedSvg(stateColor)}</div>`
+        : `<div style="transform:rotate(${truck.course ?? 0}deg);width:30px;height:30px;display:flex;align-items:center;justify-content:center;">` +
+          `<div style="width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;` +
+          `border-bottom:22px solid ${stateColor};filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));"></div></div>`
+      const sz: [number, number] = dumping ? [34, 34] : [30, 30]
+      const icon = L.divIcon({ html, className: '', iconSize: sz, iconAnchor: [sz[0] / 2, sz[1] / 2] })
       if (ls.truck) ls.truck.setLatLng([truck.lat, truck.lng]).setIcon(icon)
       else ls.truck = L.marker([truck.lat, truck.lng], { icon, zIndexOffset: 1000 }).addTo(map)
     } else if (ls.truck) { ls.truck.remove(); ls.truck = undefined }
@@ -199,7 +230,7 @@ function DispatchMap({
         } else if (truck) map.setView([truck.lat, truck.lng], 15)
       }
     }
-  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, loadingDest?.lat, loadingDest?.lng, loadingLabel, geofenceM, lane, destKind, stateColor, route, rings])
+  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, loadingDest?.lat, loadingDest?.lng, loadingLabel, geofenceM, lane, destKind, stateColor, dumping, route, rings])
 
   return (
     <div

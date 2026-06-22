@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, memo } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import DispatchMap from './DispatchMap'
+import { dumpBedSvg } from './DispatchMap'
 import type { DispatchMapProps } from './DispatchMap'
 import connectionManager from '../services/connectionManager'
 import { getStoredToken } from '../services/api'
@@ -56,11 +57,15 @@ function ringsFC(lng: number, lat: number, rings: { radiusM: number; color: stri
   }
 }
 
-function vehicleEl(color: string): HTMLDivElement {
+function vehicleEl(color: string, dumping = false): HTMLDivElement {
   const el = document.createElement('div')
-  el.style.cssText = 'width:30px;height:30px;display:flex;align-items:center;justify-content:center;'
-  el.innerHTML = `<i style="display:block;width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;` +
-    `border-bottom:22px solid ${color};filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));"></i>`
+  el.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;'
+  el.dataset.dumping = dumping ? '1' : '0'
+  // Arrived at Dump -> tilting-truck-bed dumping glyph; otherwise heading arrow.
+  el.innerHTML = dumping
+    ? dumpBedSvg(color)
+    : `<i style="display:block;width:0;height:0;border-left:10px solid transparent;border-right:10px solid transparent;` +
+      `border-bottom:22px solid ${color};filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));"></i>`
   return el
 }
 function destEl(color: string): HTMLDivElement {
@@ -247,7 +252,7 @@ function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, loadingDest, loadingLabel, geofenceM, route, routeSegments, roads, rings, destKind = 'dump', stateColor = '#38BDF8' } = propsRef.current
+    const { truck, dest, loadingDest, loadingLabel, geofenceM, route, routeSegments, roads, rings, destKind = 'dump', stateColor = '#38BDF8', dumping = false } = propsRef.current
 
     // Route source: prefer the curated loaded/empty LANE segments (each tagged
     // `lane` → coloured by the line layer); else the plain fallback line.
@@ -271,15 +276,26 @@ function NavMap(props: DispatchMapProps) {
     if (map.getLayer('geo-fill')) map.setPaintProperty('geo-fill', 'fill-color', dc)
     if (map.getLayer('geo-line')) map.setPaintProperty('geo-line', 'line-color', dc)
 
-    // vehicle marker (heading-aware)
+    // vehicle marker (heading-aware; upright dump-bed glyph while dumping)
     if (truck && isFinite(truck.lat) && isFinite(truck.lng)) {
-      if (!vehRef.current) vehRef.current = new maplibregl.Marker({ element: vehicleEl(stateColor), rotationAlignment: 'map' }).setLngLat([truck.lng, truck.lat]).addTo(map)
-      else {
+      if (!vehRef.current) {
+        vehRef.current = new maplibregl.Marker({ element: vehicleEl(stateColor, dumping), rotationAlignment: 'map' }).setLngLat([truck.lng, truck.lat]).addTo(map)
+      } else {
         vehRef.current.setLngLat([truck.lng, truck.lat])
-        const tri = vehRef.current.getElement().querySelector('i') as HTMLElement | null
-        if (tri) tri.style.borderBottomColor = stateColor
+        const el = vehRef.current.getElement()
+        // Rebuild the glyph when the dumping state toggles (arrow <-> dump bed).
+        if (el.dataset.dumping !== (dumping ? '1' : '0')) {
+          const next = vehicleEl(stateColor, dumping)
+          el.dataset.dumping = next.dataset.dumping || '0'
+          el.style.cssText = next.style.cssText
+          el.innerHTML = next.innerHTML
+        } else {
+          const tri = el.querySelector('i') as HTMLElement | null
+          if (tri) tri.style.borderBottomColor = stateColor
+        }
       }
-      vehRef.current.setRotation(truck.course ?? 0)
+      // Keep the dump-bed glyph upright; rotate only the heading arrow.
+      vehRef.current.setRotation(dumping ? 0 : (truck.course ?? 0))
     } else if (vehRef.current) { vehRef.current.remove(); vehRef.current = null }
 
     // destination marker
@@ -326,7 +342,7 @@ function NavMap(props: DispatchMapProps) {
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
       props.loadingDest?.lat, props.loadingDest?.lng, props.loadingLabel,
-      props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.rings])
+      props.geofenceM, props.destKind, props.stateColor, props.dumping, props.route, props.routeSegments, props.roads, props.rings])
 
   if (glFailed) return <DispatchMap {...props} />
 

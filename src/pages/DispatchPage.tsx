@@ -16,7 +16,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo, lazy, Suspense
 import { apiFetch } from '../services/api'
 import { submitDispatchAction, submitCycleEvent } from '../services/backgroundSync'
 import { DispatchOutbox } from '../services/dispatchOutbox'
-import { advanceOffline, buildOfflineProfile, type CycleState, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
+import { advanceOffline, buildOfflineProfile, haversineM, type CycleState, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
 import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { useDispatchT } from '../services/dispatchI18n'
@@ -174,7 +174,10 @@ const DRIVER_ACTIONS: Record<string, DriverAct> = {
 // reports GPS unavailable, so a stuck truck can still be advanced by hand).
 const DRIVER_FALLBACK_ACTIONS: Record<string, DriverAct> = {
   fullTravel1:  { label: 'Arrived — Dump',                 color: '#A16207', kind: 'advance', next: 'dumping' },
-  dumping:      { label: 'Depart / Complete Dumping',      color: '#A16207', kind: 'advance', next: 'emptyTravel1' },
+  // NOTE: 'dumping' has NO fallback advance here. Completing a dump is the
+  // dedicated two-tap "Finish Dumping" button (finishDumping() -> POST
+  // /api/dispatch/finish-dumping), which is surfaced even in GPS-down mode, so a
+  // single, unambiguous control closes the dump event + advances to Travel Empty.
   emptyTravel1: { label: 'Arrived — Shovel · Join Queue',  color: '#FFE600', kind: 'advance', next: 'waiting' },
 }
 
@@ -852,6 +855,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [err, setErr] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
   const [msg, setMsg] = useState('')
+  // Dumping-scenario: brief "Dumping Confirmed" success flash after Finish Dumping.
+  const [dumpConfirmed, setDumpConfirmed] = useState(false)
   const [manual, setManual] = useState<{ status: string; reason?: string } | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
   const [gpsNote, setGpsNote] = useState(false)
@@ -1071,6 +1076,43 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     } catch { setMsg('Network error') } finally { setActing(false) }
   }
 
+  // ── FINISH DUMPING (Dumping-scenario second tap) ────────────────────────
+  // The driver confirms the load was discharged. Closes the dump event (dome
+  // queue dwell) + advances dumping -> emptyTravel1 (Travel Empty). Offline-
+  // first: submitDispatchAction posts when online and otherwise queues the tap
+  // (minted client_event_id/client_ts) for FIFO replay, so it works in the
+  // low-signal dome. On success we flash "Dumping Confirmed" then drop the truck
+  // to the empty-travel/navigation view.
+  async function finishDumping() {
+    if (!truck) return
+    setActing(true); setMsg('')
+    try {
+      const res = await submitDispatchAction({
+        kind: 'finish_dumping',
+        endpoint: '/api/dispatch/finish-dumping',
+        scopeKey: truck.truck_no,
+        payload: { plan_id: planId, truck_no: truck.truck_no, excavator_no: excavatorNo },
+        expectedState: 'emptyTravel1',
+      })
+      if (res.ok && res.applied) {
+        setDumpConfirmed(true)
+        setTruck((t) => t ? { ...t, state: 'emptyTravel1', state_color: undefined, state_label: undefined } : t)
+        setTimeout(() => setDumpConfirmed(false), 2600)
+      } else if (res.ok && !res.applied) {                    // queued offline
+        setDumpConfirmed(true)
+        setMsg(dt('queued_offline'))
+        setTruck((t) => t ? { ...t, state: 'emptyTravel1', state_color: undefined, state_label: undefined } : t)
+        setTimeout(() => setDumpConfirmed(false), 2600)
+      } else {                                                // rejected
+        const d = res.data
+        // A reverted/stale truck (left the dome without confirming) is reconciled
+        // server-side; surface a short, clear note rather than a hard error.
+        setMsg((d?.reason === 'not_at_dump') ? dt('not_at_dump')
+              : (d?.stale ? dt('dump_already_done') : (d?.message || 'Could not finish dumping')))
+      }
+    } catch { setMsg('Network error') } finally { setActing(false) }
+  }
+
   const st = truck?.state
   const v2 = st ? STATE_STYLE[st] : undefined
   // Driver's primary action: normally only First Bucket (everything else auto-
@@ -1114,6 +1156,20 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
     : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
   const speedKph = tel?.speed != null ? Math.max(0, Math.round(tel.speed)) : null
   const nextLocName = isFull ? (dumpLoc || dt('dump_loc')) : (loadingLoc || excavatorNo || dt('shovel'))
+
+  // ── Dumping-scenario geofence: is the truck INSIDE the dump dome right now? ──
+  // Distance truck -> dump, from the best live fix (offline device GPS, server
+  // TMS, or last-known), compared against the dump geofence radius. Drives the
+  // big "Finish Dumping" button, which appears ONLY when state==dumping AND the
+  // truck is inside the dome (acceptance criteria) and disappears on a drive-by.
+  const dumpDistanceM = (truckPt && geo.dumpLat != null && geo.dumpLng != null)
+    ? haversineM(truckPt.lat, truckPt.lng, geo.dumpLat, geo.dumpLng) : null
+  const atDump = dumpDistanceM != null && dumpDistanceM <= (geo.dumpZoneM ?? 50)
+  // Show the Finish Dumping action when Arrived at Dump and inside the dome. When
+  // GPS is unavailable (driver reported it) we still surface it so a stuck truck
+  // can confirm by hand; the server re-validates the geofence on submit.
+  const showFinishDump = st === 'dumping' && (atDump || gpsNote)
+
 
   // Prototype "required action" guidance shown above the Waiting-Event button.
   const reqHint = (() => {
@@ -1295,7 +1351,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                                  color: D.sub, fontSize: '0.82rem', fontWeight: 700 }}>{dt('loading') || 'Loading map…'}</div>}>
                     <NavMap truck={truckPt} dest={dest} loadingDest={loadingDest} loadingLabel={loadingLoc}
                             geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
-                            destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
+                            destKind={destKind} stateColor={curColor} dumping={st === 'dumping'} route={routePts} routeSegments={routeSegments} roads={roads}
                             height="100%" visible={viewMode === 'map'} />
                   </Suspense>
                 </div>
@@ -1374,7 +1430,29 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 </div>
               </div>
 
-              {act ? (
+              {(dumpConfirmed || showFinishDump) ? (
+                dumpConfirmed ? (
+                  // SUCCESS FLASH — "Dumping Confirmed" before the view drops to
+                  // the empty-travel navigation. High-contrast green, gloves-size.
+                  <div style={{ marginTop: 12, minHeight: 92, borderRadius: 16,
+                                background: '#16A34A', border: '1px solid #22C55E',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                                justifyContent: 'center', textAlign: 'center', padding: '12px 14px',
+                                boxShadow: '0 8px 22px rgba(34,197,94,0.45)' }}>
+                    <div style={{ color: '#fff', fontWeight: 900, fontSize: '1.35rem', letterSpacing: '0.02em' }}>
+                      ✓ {dt('dump_confirmed')}
+                    </div>
+                    <div style={{ color: '#dcfce7', fontSize: '0.82rem', marginTop: 4 }}>{dt('dump_travel_empty')}</div>
+                  </div>
+                ) : (
+                  // FINISH DUMPING — the Dumping-scenario second tap. Large,
+                  // high-contrast green, gloves-friendly. Shown ONLY at the dome.
+                  <button onClick={finishDumping} disabled={acting}
+                          style={{ ...bigBtn('#16A34A', acting), minHeight: 96, fontSize: '1.4rem', marginTop: 12 }}>
+                    {acting ? dt('recording') : dt('finish_dumping')}
+                  </button>
+                )
+              ) : act ? (
                 <button onClick={() => run(act)} disabled={acting || (act.kind === 'first_bucket' && otherLoading)}
                         style={{ ...bigBtn(act.color, acting || (act.kind === 'first_bucket' && otherLoading)), minHeight: 92, fontSize: '1.35rem', marginTop: 12 }}>
                   {acting ? dt('recording')

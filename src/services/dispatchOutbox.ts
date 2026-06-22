@@ -30,6 +30,7 @@ import type { DBSchema, IDBPDatabase } from 'idb'
 export type DispatchActionKind =
   | 'loading_start'      // POST /api/dispatch/loading/start
   | 'cycle_advance'      // POST /api/dispatch/cycle-advance
+  | 'finish_dumping'     // POST /api/dispatch/finish-dumping
   | 'equipment_status'   // POST /api/dispatch/equipment-status
   | 'connect_truck'      // POST /api/dispatch/connect-truck
   | 'connect_excavator'  // POST /api/dispatch/connect-excavator
