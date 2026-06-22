@@ -68,6 +68,30 @@ function destEl(color: string): HTMLDivElement {
   el.style.cssText = `width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6);`
   return el
 }
+
+// A small filled arrowhead pointing UP (north in image space). MapLibre's
+// `symbol-placement:'line'` rotates it to the line's forward tangent, so on a
+// lane/route line drawn in TRAVEL order it ends up pointing the mandated flow
+// (arrow) direction. One icon per colour: loaded / empty / generic route / the
+// faint background haul-lane arrow. Returned as ImageData for map.addImage().
+function arrowIcon(color: string, size = 20): ImageData {
+  const c = document.createElement('canvas'); c.width = size; c.height = size
+  const x = c.getContext('2d') as CanvasRenderingContext2D
+  x.clearRect(0, 0, size, size)
+  x.fillStyle = color
+  x.strokeStyle = 'rgba(0,0,0,0.55)'
+  x.lineWidth = 1.6
+  x.lineJoin = 'round'
+  x.beginPath()
+  x.moveTo(size / 2, 2)                 // tip (top centre = forward)
+  x.lineTo(size - 3, size - 3)          // bottom-right barb
+  x.lineTo(size / 2, size * 0.64)       // tail notch
+  x.lineTo(3, size - 3)                 // bottom-left barb
+  x.closePath()
+  x.fill(); x.stroke()
+  return x.getImageData(0, 0, size, size)
+}
+
 // A labelled flag for the FIXED assigned loading area (its own coordinates),
 // shown next to the live shovel marker on the empty leg.
 function loadFlagEl(label: string): HTMLDivElement {
@@ -155,6 +179,24 @@ function NavMap(props: DispatchMapProps) {
       map.addSource('lanes', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'lanes-line', type: 'line', source: 'lanes',
         paint: { 'line-color': ['match', ['get', 'loaded_side'], 'left', '#38BDF8', 'right', '#38BDF8', '#94A3B8'], 'line-width': 2, 'line-opacity': 0.5 } })
+      // Register the flow-direction arrowheads ONCE, then a symbol layer repeats
+      // them along every haul lane. Lane features come from the server already
+      // drawn in TRAVEL order, so `symbol-placement:'line'` points each arrow the
+      // mandated flow (one-way arrow) direction — the driver always sees which way
+      // a lane runs, never a wrong-way hint.
+      try {
+        if (!map.hasImage('arrow-lane')) map.addImage('arrow-lane', arrowIcon('#cbd5e1'), { pixelRatio: 2 })
+        if (!map.hasImage('arrow-loaded')) map.addImage('arrow-loaded', arrowIcon('#fb923c'), { pixelRatio: 2 })
+        if (!map.hasImage('arrow-empty')) map.addImage('arrow-empty', arrowIcon('#4ade80'), { pixelRatio: 2 })
+        if (!map.hasImage('arrow-route')) map.addImage('arrow-route', arrowIcon('#ffffff'), { pixelRatio: 2 })
+      } catch { /* addImage unsupported — lines still render without arrows */ }
+      map.addLayer({ id: 'lanes-arrows', type: 'symbol', source: 'lanes',
+        layout: {
+          'symbol-placement': 'line', 'symbol-spacing': 90,
+          'icon-image': 'arrow-lane', 'icon-size': 0.5,
+          'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        },
+        paint: { 'icon-opacity': 0.55 } })
       map.addSource('geo', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'geo-fill', type: 'fill', source: 'geo', paint: { 'fill-color': '#A16207', 'fill-opacity': 0.12 } })
       map.addLayer({ id: 'geo-line', type: 'line', source: 'geo', paint: { 'line-color': '#A16207', 'line-width': 2 } })
@@ -166,6 +208,17 @@ function NavMap(props: DispatchMapProps) {
       map.addSource('route', { type: 'geojson', data: EMPTY })
       map.addLayer({ id: 'route-cap', type: 'line', source: 'route', paint: { 'line-color': '#0b1220', 'line-width': 9, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', paint: { 'line-color': ['match', ['get', 'lane'], 'empty', '#15803d', 'loaded', '#c2410c', 'route', '#f59e0b', '#c2410c'], 'line-width': 5.5 }, layout: { 'line-cap': 'round', 'line-join': 'round' } })
+      // Direction arrows ALONG the active route — segments arrive in travel order
+      // so the arrows confirm the driver is being sent the right way down each
+      // (one-way) lane. Coloured per lane type to match the route line.
+      map.addLayer({ id: 'route-arrows', type: 'symbol', source: 'route',
+        layout: {
+          'symbol-placement': 'line', 'symbol-spacing': 70,
+          'icon-image': ['match', ['get', 'lane'], 'empty', 'arrow-empty', 'loaded', 'arrow-loaded', 'arrow-route'],
+          'icon-size': 0.7, 'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        },
+        paint: { 'icon-opacity': 0.95 } })
       setReady(true)
       setTimeout(() => { try { map.resize() } catch { /* */ } }, 200)
     })
