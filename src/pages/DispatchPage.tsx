@@ -205,6 +205,15 @@ function equipmentTypeLabel(t?: string) {
   return (t && EQUIPMENT_TYPE_LABELS[t]) || 'Equipment'
 }
 
+// One colour per fleet family so the connect dropdown reads at a glance:
+// excavator = teal, dump truck = blue, app-only ancillary gear = amber/gold.
+function fleetTypeColor(t?: string): string {
+  if (t === 'excavator') return '#2dd4bf'
+  if (t === 'dump_truck') return '#38bdf8'
+  if (t && EQUIPMENT_TYPES.includes(t)) return '#f5a524'   // ancillary support equipment
+  return '#38bdf8'
+}
+
 function statusColor(s?: string) {
   if (s === 'EXPIRED' || s === 'NO_KIMPER') return C.red
   if (s === 'EXPIRING_SOON' || s === 'NO_DATE') return C.amber
@@ -757,7 +766,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
                                          boxShadow: s.live ? `0 0 7px ${F.green}` : 'none' }} />
                           <span style={{ fontWeight: 800, color: F.ink, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.unit_no}</span>
                         </span>
-                        <span style={fmsChip(s.type === 'excavator' ? '#2dd4bf' : F.blue)}>{s.type_label}</span>
+                        <span style={fmsChip(fleetTypeColor(s.type))}>{s.type_label}</span>
                       </button>
                     ))}
                   </div>
@@ -1448,6 +1457,7 @@ function EquipmentOuiPanel({ employeeId, unitNo, unitType }:
   const curMeta = manualMeta(cur)
   const nonOp = cur !== 'operating'
   const typeLabel = equipmentTypeLabel(unitType)
+  const typeColor = fleetTypeColor(unitType)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
@@ -1455,12 +1465,12 @@ function EquipmentOuiPanel({ employeeId, unitNo, unitType }:
       <div style={{ ...panel, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ width: 48, height: 48, borderRadius: 13, flexShrink: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '1.5rem', background: 'rgba(245,165,36,0.12)',
-                      border: `1px solid rgba(245,165,36,0.35)` }}>🚜</div>
+                      fontSize: '1.5rem', background: `${typeColor}1F`,
+                      border: `1px solid ${typeColor}59` }}>🚜</div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ color: D.ink, fontWeight: 900, fontSize: '1.25rem', letterSpacing: '0.03em',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitNo}</div>
-          <div style={{ color: D.sub, fontSize: '0.8rem', fontWeight: 700 }}>{typeLabel}</div>
+          <span style={{ ...chip(typeColor), display: 'inline-block', marginTop: 4 }}>{typeLabel}</span>
         </div>
         <span style={chip(curMeta?.color || '#16A34A')}>{dt('ms_' + cur).toUpperCase()}</span>
       </div>

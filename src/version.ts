@@ -7,6 +7,13 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.46.0 — App-only equipment polish + web visibility. (1) The connect dropdown
+ *          now colour-codes each fleet family — excavator (teal), dump truck
+ *          (blue), app-only ancillary gear (amber) — and the Equipment OUI header
+ *          uses that family colour. (2) The manager web site map now badges OUI
+ *          support equipment (🛠) and shows the operator's live manual status +
+ *          reason in the marker popup (backend overlay now carries
+ *          support_equipment + status + status_reason on the OUI feed row).
  * 2.45.0 — App-only equipment sign-on. Ancillary/support units (grader, dozer,
  *          compactor, loader, light vehicle, ...) have NO onboard TMS/GPS, so
  *          they only exist in the FMS while an operator is signed on through the
@@ -378,4 +385,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.45.0'
+export const APP_VERSION = '2.46.0'
