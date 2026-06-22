@@ -62,6 +62,22 @@ type UnitSuggestion = {
   unit_no: string; type: string; type_label: string
   org?: string; live?: boolean; state?: string
 }
+// Live truck-card preview (Step 2) assembled from existing endpoints:
+// resolve-unit (type/live/state), equipment-status (manual maintenance/etc.),
+// and the dispatch board (assigned shovel + the connected driver's name). Every
+// field is optional so the card degrades gracefully when a source is offline.
+type UnitPreview = {
+  unit_no: string
+  type?: string | null
+  type_label?: string
+  live?: boolean
+  found?: boolean
+  manual_status?: string | null        // operating | delay | standby | breakdown | maintenance
+  manual_reason?: string | null
+  assigned_shovel?: string | null
+  current_operator?: string | null     // a DIFFERENT operator already connected
+  cycle_label?: string | null          // current haul-cycle stage, if on a plan
+}
 
 const SUPPORTED_TYPES = ['excavator', 'dump_truck']
 // App-only ancillary equipment (no onboard TMS/GPS) — these sign on through the
@@ -100,6 +116,53 @@ function visibleInterval(fn: () => void, ms: number): () => void {
     stop()
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis)
   }
+}
+
+// ── Keyboard avoidance ────────────────────────────────────────────────────
+// On a cab tablet the on-screen keyboard (when the operator isn't using the
+// physical one) covers the bottom of the screen. The visualViewport API tells
+// us exactly how much is occluded; we return that pixel inset so the sign-on
+// column can pad its bottom by it and keep the focused input + preview card in
+// view. Zero on desktop / when no keyboard is up. No new dependency.
+function useKeyboardInset(): number {
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    if (!vv) return
+    const onResize = () => {
+      // Occluded height = layout viewport bottom - visual viewport bottom.
+      const occluded = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+      // Ignore tiny deltas (URL bar jitter) so the layout doesn't twitch.
+      setInset(occluded > 80 ? Math.round(occluded) : 0)
+    }
+    onResize()
+    vv.addEventListener('resize', onResize)
+    vv.addEventListener('scroll', onResize)
+    return () => { vv.removeEventListener('resize', onResize); vv.removeEventListener('scroll', onResize) }
+  }, [])
+  return inset
+}
+
+// Initials from a name (or fall back to the ID) for the avatar tile.
+function initialsOf(name?: string, fallback?: string): string {
+  const src = (name || '').trim()
+  if (src) {
+    const parts = src.split(/\s+/).filter(Boolean)
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    return src.slice(0, 2).toUpperCase()
+  }
+  return (fallback || '').trim().slice(0, 2).toUpperCase() || '–'
+}
+
+// A small inline spinner (uses the global .spinner keyframes in index.css).
+function Spinner({ size = 22, color = '#f5a524' }: { size?: number; color?: string }) {
+  return (
+    <span className="spinner" style={{
+      display: 'inline-block', width: size, height: size, borderRadius: '50%',
+      border: `${Math.max(2, Math.round(size / 9))}px solid rgba(255,255,255,0.18)`,
+      borderTopColor: color, boxSizing: 'border-box',
+    }} />
+  )
 }
 
 // Connect-time advisories. Each carries a compact ICON (so the cab top bar shows
@@ -256,10 +319,34 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   const [connectedUnit, setConnectedUnit] = useState('')
   const [online, setOnline] = useState<boolean>(() => connectionManager.getStatus().isOnline)
   const [viewMode, setViewMode] = useState<'map' | 'status'>('map')
+  // Full-screen "Connecting…" splash shown between a successful connect tap and
+  // the operator window mounting, so the operator gets clear feedback the action
+  // took (the connect round-trip can be a second or two on a cab tablet).
+  const [connecting, setConnecting] = useState(false)
+  // Keyboard inset (px occluded by the on-screen keyboard) so the sign-on column
+  // can keep the focused input + its live preview card above the keyboard.
+  const kbInset = useKeyboardInset()
+  // ── LIVE OPERATOR PREVIEW (Step 1) ──────────────────────────────────────
+  // As the operator types their ID we resolve it (debounced) and show a preview
+  // card — name, department, KIMPER status, avatar — BEFORE they commit. The
+  // confirmed `profile` (which advances to Step 2) is only set when they tap
+  // "Continue as <name>". `idPreview` is the in-progress lookup for that card.
+  const [idPreview, setIdPreview] = useState<Profile | null>(null)
+  const [idPreviewLoading, setIdPreviewLoading] = useState(false)
+  const [idPreviewOffline, setIdPreviewOffline] = useState(false)
+  const [idPreviewError, setIdPreviewError] = useState<string | null>(null)
+  // ── LIVE TRUCK PREVIEW (Step 2) ─────────────────────────────────────────
+  // As the operator types the unit number we resolve it (debounced) and show a
+  // truck card — model/type, status, assigned shovel, current operator — before
+  // they tap Connect. Built from existing endpoints only (resolve-unit + board +
+  // equipment-status); fields degrade gracefully when a source is unavailable.
+  const [unitPreview, setUnitPreview] = useState<UnitPreview | null>(null)
+  const [unitPreviewLoading, setUnitPreviewLoading] = useState(false)
   // Employee-ID keyboard: numeric by default (IDs are mostly digits), with an
   // in-app 123/ABC toggle since the OS numeric pad has no letter switch.
   const [idMode, setIdMode] = useState<'numeric' | 'text'>('numeric')
   const idInputRef = useRef<HTMLInputElement>(null)
+  const unitInputRef = useRef<HTMLInputElement>(null)
   function toggleIdKeyboard() {
     setIdMode((m) => (m === 'numeric' ? 'text' : 'numeric'))
     const el = idInputRef.current
@@ -275,6 +362,15 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
 
   // The supported types this person may actually connect (Kimper ∩ {exc, truck}).
   const supportedAllowed = (profile?.allowed_types || []).filter((t) => SUPPORTED_TYPES.includes(t))
+
+  // Hard-block the Connect button only when the live truck card shows the unit is
+  // genuinely unavailable: under maintenance, or already connected to a DIFFERENT
+  // operator. (KIMPER / type advisories never block — they're warnings.)
+  const connectBlocked = !!unitPreview && (
+    unitPreview.manual_status === 'maintenance' ||
+    unitPreview.manual_status === 'breakdown' ||
+    !!unitPreview.current_operator
+  )
 
   // Offline-FIRST identify: resolve from the on-device cache instantly, then
   // enrich from the server when reachable.
@@ -311,6 +407,124 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     }
   }
 
+  // ── Step 1: DEBOUNCED LIVE OPERATOR PREVIEW ───────────────────────────────
+  // As the operator types their ID, resolve it (offline cache first, then server)
+  // and fill the preview card — name, dept, KIMPER, avatar — so they SEE who they
+  // are before committing. Debounced 350ms to avoid hammering /lookup per keypress.
+  // Only runs on Step 1 (before a profile is confirmed).
+  useEffect(() => {
+    if (profile) return                                  // already on Step 2
+    const id = employeeId.trim()
+    if (!id) { setIdPreview(null); setIdPreviewError(null); setIdPreviewLoading(false); return }
+    let alive = true
+    setIdPreviewLoading(true); setIdPreviewError(null)
+    const h = setTimeout(async () => {
+      // Offline cache first — instant card with no signal.
+      let cached: Awaited<ReturnType<typeof buildOfflineProfile>> = null
+      try { cached = await buildOfflineProfile(id) } catch { /* cache miss */ }
+      if (alive && cached) { setIdPreview(cached as unknown as Profile); setIdPreviewOffline(true) }
+      try {
+        const r = await apiFetch(`/api/dispatch/lookup?employee_id=${encodeURIComponent(id)}`, {}, { timeout: 45000 })
+        const data = await r.json()
+        if (!alive) return
+        if (r.ok && data.success) {
+          setIdPreview(data.profile as Profile); setIdPreviewOffline(false); setIdPreviewError(null)
+        } else if (!cached) {
+          setIdPreview(null); setIdPreviewError(dt('id_not_found'))
+        }
+      } catch {
+        // Network unreachable AND no cached hit → reassuring message, not a dead end.
+        if (alive && !cached) {
+          let dataReady = false
+          try {
+            const { offlineDataSync } = await import('../services/offlineDataSync')
+            const st = await offlineDataSync.getSyncStatus()
+            dataReady = !!st.hasData
+            if (!dataReady) offlineDataSync.syncOfflineData(true).catch(() => { /* retry later */ })
+          } catch { /* unavailable */ }
+          setIdPreview(null)
+          setIdPreviewError(dataReady ? dt('no_signal_id') : dt('data_not_ready_syncing'))
+        }
+      } finally {
+        if (alive) setIdPreviewLoading(false)
+      }
+    }, 350)
+    return () => { alive = false; clearTimeout(h) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, profile])
+
+  // Commit the previewed operator → advance to Step 2 (no re-fetch; the preview
+  // already resolved the profile). Falls back to identify() if the preview hasn't
+  // landed yet (e.g. the operator hit Enter very fast).
+  function confirmOperator() {
+    if (idPreview) {
+      setProfile(idPreview)
+      setProfileOffline(idPreviewOffline)
+      setError(null); setResult(null)
+      setUnitNo(''); setSelectedType(null); setSuggestions([]); setUnitPreview(null)
+      // focus the unit field for the next step
+      setTimeout(() => unitInputRef.current?.focus(), 80)
+    } else {
+      void identify()
+    }
+  }
+
+  // ── Step 2: DEBOUNCED LIVE TRUCK PREVIEW ──────────────────────────────────
+  // As the operator types the unit number, resolve it (existing endpoints only)
+  // and fill the truck card — type, live status, manual status (maintenance/etc.),
+  // assigned shovel, and any operator already connected. Debounced 350ms.
+  useEffect(() => {
+    if (!profile) return
+    const u = unitNo.trim().toUpperCase()
+    if (!u) { setUnitPreview(null); setUnitPreviewLoading(false); return }
+    if (!online) { setUnitPreview(null); setUnitPreviewLoading(false); return }  // offline → free-type
+    let alive = true
+    setUnitPreviewLoading(true)
+    const h = setTimeout(async () => {
+      const pv: UnitPreview = { unit_no: u }
+      // 1) resolve-unit — type + live + cycle state (cheap, primary source)
+      try {
+        const r = await apiFetch(`/api/dispatch/resolve-unit?unit_no=${encodeURIComponent(u)}`, {}, { timeout: 45000 })
+        const d = await r.json()
+        const tms = d?.tms
+        pv.found = !!d?.found
+        if (tms) {
+          pv.type = tms.asset_type || null
+          pv.live = !!tms.live
+          pv.cycle_label = tms.state ? (STATE_STYLE[tms.state]?.label || tms.state) : null
+        }
+      } catch { /* offline / unknown */ }
+      // 2) equipment-status — manual maintenance/breakdown/standby/delay
+      try {
+        const r = await apiFetch(`/api/dispatch/equipment-status?unit_no=${encodeURIComponent(u)}`)
+        const d = await r.json()
+        if (d?.success && d.status) { pv.manual_status = d.status.status; pv.manual_reason = d.status.reason }
+      } catch { /* best-effort */ }
+      // 3) board — assigned shovel + the connected driver's name (best-effort)
+      try {
+        const r = await apiFetch('/api/dispatch/board')
+        const bd = await r.json()
+        if (bd && Array.isArray(bd.excavators)) {
+          for (const exc of bd.excavators) {
+            const mine = (exc.trucks || []).find((t: OpTruck) => (t.truck_no || '').trim().toUpperCase() === u)
+            if (mine) {
+              pv.assigned_shovel = exc.excavator_no || null
+              if (mine.driver_name && mine.connected) pv.current_operator = mine.driver_name
+              if (!pv.cycle_label && mine.state) pv.cycle_label = STATE_STYLE[mine.state]?.label || mine.state
+              break
+            }
+          }
+        }
+      } catch { /* best-effort */ }
+      pv.type_label = pv.type === 'excavator' ? dt('excavator')
+        : pv.type === 'dump_truck' ? dt('dump_truck')
+        : pv.type ? equipmentTypeLabel(pv.type) : ''
+      if (alive) { setUnitPreview(pv); setUnitPreviewLoading(false) }
+    }, 350)
+    return () => { alive = false; clearTimeout(h) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitNo, profile, online])
+
   // Debounced unit autocomplete — only the SUPPORTED types this person may run.
   useEffect(() => {
     if (!showDrop) return
@@ -343,7 +557,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     if (!profile) return
     const u = unit.trim().toUpperCase()
     if (!u) { setError(dt('enter_unit_first')); return }
-    setShowDrop(false); setLoading(true); setError(null); setResult(null)
+    setShowDrop(false); setLoading(true); setConnecting(true); setError(null); setResult(null)
     try {
       let t = type
       if (!t || !CONNECT_TYPES.includes(t)) {
@@ -378,9 +592,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
                                // rather than show a false "couldn't reach server"
       const data = await r.json() as ConnectResult
       if (r.status === 403 && data.authorized === false) {
-        setError(data.message || dt('not_authorized'))
+        setError(data.message || dt('not_authorized')); setConnecting(false)
       } else if (!r.ok || !data.success) {
-        setError(data.message || dt('connect_failed'))
+        setError(data.message || dt('connect_failed')); setConnecting(false)
       } else {
         setConnectedUnit(u)
         setResult(data)
@@ -389,9 +603,12 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         void import('../services/locationShare')
           .then((m) => m.setConnectedScope({ employeeId: profile.employee_id, unitNo: u }))
           .catch(() => { /* location share unavailable */ })
+        // Keep the "Connecting…" splash up briefly so it crossfades into the
+        // operator window instead of flashing; the window mounts on `result`.
+        setTimeout(() => setConnecting(false), 650)
       }
     } catch {
-      setError(online ? dt('network_err') : dt('offline_connect'))
+      setError(online ? dt('network_err') : dt('offline_connect')); setConnecting(false)
     } finally {
       setLoading(false)
     }
@@ -423,9 +640,20 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   function reset() {
     setEmployeeId(''); setProfile(null); setUnitNo(''); setSelectedType(null)
     setSuggestions([]); setShowDrop(false); setError(null); setResult(null); setConnectedUnit('')
+    setIdPreview(null); setIdPreviewError(null); setIdPreviewOffline(false)
+    setUnitPreview(null); setConnecting(false)
     void import('../services/locationShare')
       .then((m) => m.setConnectedScope(null))
       .catch(() => { /* noop */ })
+    setTimeout(() => idInputRef.current?.focus(), 80)
+  }
+
+  // Back from Step 2 → Step 1 (keep nothing from the unit step).
+  function backToOperator() {
+    setProfile(null); setProfileOffline(false)
+    setUnitNo(''); setSelectedType(null); setSuggestions([]); setShowDrop(false)
+    setUnitPreview(null); setError(null); setResult(null)
+    setTimeout(() => idInputRef.current?.focus(), 80)
   }
 
   // The active connection drives which operator window opens (from a fresh
@@ -641,40 +869,44 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         </div>
       </header>
 
-      {/* ── centered content column (tablet-friendly) ── */}
-      <div style={{ width: '100%', maxWidth: 540, margin: '0 auto', padding: '18px 16px 0',
-                    display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* ── centered content column (tablet-friendly) ──
+          paddingBottom grows with the on-screen keyboard so the focused input +
+          its live preview card always stay visible above it (keyboard avoidance). */}
+      <div style={{ width: '100%', maxWidth: 560, margin: '0 auto',
+                    padding: `18px 16px ${24 + kbInset}px`, transition: 'padding-bottom 0.18s ease',
+                    display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* step indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 2px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 2px 0' }}>
           {stepDot('1', !profile ? 'active' : 'done')}
-          <div style={{ flex: 1, height: 2, borderRadius: 2, background: profile ? F.gold : F.line2 }} />
+          <div style={{ flex: 1, height: 3, borderRadius: 3, background: profile ? F.gold : F.line2 }} />
           {stepDot('2', profile ? 'active' : 'idle')}
-          <div style={{ marginLeft: 8, fontSize: '0.74rem', fontWeight: 700, color: F.sub, whiteSpace: 'nowrap' }}>
-            {!profile ? 'Identify operator' : 'Select unit'}
+          <div style={{ marginLeft: 8, fontSize: '0.86rem', fontWeight: 700, color: F.sub, whiteSpace: 'nowrap' }}>
+            {!profile ? dt('step_identify') : dt('step_select_unit')}
           </div>
         </div>
 
         {!online && (
-          <div style={{ background: 'rgba(245,158,11,0.10)', border: `1px solid rgba(245,158,11,0.40)`,
-                        color: '#fcd34d', borderRadius: 14, padding: '11px 14px', fontSize: '0.82rem', fontWeight: 600 }}>
-            ⚠ {dt('offline_banner')}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'rgba(245,158,11,0.10)',
+                        border: `1px solid rgba(245,158,11,0.40)`, color: '#fcd34d', borderRadius: 14,
+                        padding: '12px 15px', fontSize: '0.92rem', fontWeight: 600 }}>
+            <span style={{ fontSize: '1.1rem' }}>⚠</span>{dt('offline_banner')}
           </div>
         )}
 
-        {/* Step 1 — identify */}
+        {/* ════════ STEP 1 — OPERATOR SIGN-ON ════════ */}
         {!profile && (
           <div style={fmsCard}>
-            <div style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: 2 }}>Operator sign-on</div>
-            <div style={{ color: F.sub, fontSize: '0.82rem', marginBottom: 16 }}>{dt('title')}</div>
+            <div style={{ fontSize: '1.35rem', fontWeight: 800, marginBottom: 3 }}>{dt('operator_signon')}</div>
+            <div style={{ color: F.sub, fontSize: '0.95rem', marginBottom: 18 }}>{dt('title')}</div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
               <label style={fmsLabel}>{dt('enter_emp_id')}</label>
               <button
                 type="button"
                 onClick={toggleIdKeyboard}
                 aria-label="Toggle keyboard"
-                style={{ padding: '5px 13px', fontSize: '0.76rem', fontWeight: 800, color: F.gold,
+                style={{ minHeight: 40, padding: '6px 16px', fontSize: '0.86rem', fontWeight: 800, color: F.gold,
                          background: 'rgba(245,165,36,0.12)', border: `1px solid rgba(245,165,36,0.45)`,
                          borderRadius: 999, cursor: 'pointer' }}
               >
@@ -685,91 +917,113 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
               ref={idInputRef}
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && identify()}
-              placeholder="e.g. 8221118075"
+              onKeyDown={(e) => e.key === 'Enter' && confirmOperator()}
+              placeholder={dt('id_placeholder')}
               autoFocus
               inputMode={idMode}
-              style={fmsInput}
+              style={fmsInputBig}
             />
-            <button onClick={identify} disabled={loading || !employeeId.trim()} style={fmsPrimaryBtn(loading || !employeeId.trim())}>
-              {loading ? dt('checking') : dt('identify')}
+
+            {/* LIVE PREVIEW CARD — appears as you type. */}
+            <OperatorPreviewCard
+              employeeId={employeeId} preview={idPreview} loading={idPreviewLoading}
+              offline={idPreviewOffline} error={idPreviewError} dt={dt} />
+
+            <button onClick={confirmOperator}
+                    disabled={loading || !employeeId.trim() || (!idPreview && !!idPreviewError)}
+                    style={fmsBigPrimaryBtn(loading || !employeeId.trim() || (!idPreview && !!idPreviewError))}>
+              {loading ? dt('checking')
+                : idPreview ? `${dt('continue_as')} ${firstWord(idPreview.name) || idPreview.employee_id}`
+                : dt('identify')}
             </button>
           </div>
         )}
 
-        {/* Step 2 — employee card + unit dropdown */}
+        {/* ════════ STEP 2 — CONFIRMED OPERATOR + UNIT ENTRY ════════ */}
         {profile && (
           <>
             <div style={fmsCard}>
-              <div style={{ display: 'flex', gap: 13, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                 {/* operator avatar (initials) */}
-                <div style={{ width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+                <div style={{ width: 60, height: 60, borderRadius: 16, flexShrink: 0,
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '1.2rem', fontWeight: 800, color: F.gold,
+                              fontSize: '1.4rem', fontWeight: 800, color: F.gold,
                               background: 'rgba(245,165,36,0.12)', border: `1px solid rgba(245,165,36,0.35)` }}>
-                  {(profile.name || profile.employee_id).trim().slice(0, 2).toUpperCase()}
+                  {initialsOf(profile.name, profile.employee_id)}
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: '1.12rem', fontWeight: 800, color: F.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: '1.28rem', fontWeight: 800, color: F.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {profile.name || '—'}
                   </div>
-                  <div style={{ color: F.sub, fontSize: '0.82rem' }}>ID {profile.employee_id}</div>
+                  <div style={{ color: F.sub, fontSize: '0.92rem' }}>ID {profile.employee_id}</div>
                   {[profile.company, profile.department].filter(Boolean).length > 0 && (
-                    <div style={{ color: F.sub, fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ color: F.sub, fontSize: '0.86rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {[profile.company, profile.department].filter(Boolean).join(' · ')}
                     </div>
                   )}
-                  {profileOffline && <div style={{ color: F.amber, fontSize: '0.7rem', fontWeight: 700, marginTop: 2 }}>{dt('from_saved')}</div>}
+                  {profileOffline && <div style={{ color: F.amber, fontSize: '0.78rem', fontWeight: 700, marginTop: 2 }}>{dt('from_saved')}</div>}
                 </div>
-                <span style={{ ...fmsPill(kColor), alignSelf: 'flex-start' }}>
+                <span style={{ ...fmsPill(kColor), alignSelf: 'flex-start', fontSize: '0.78rem' }}>
                   KIMPER {profile.kimper_status || '—'}
                 </span>
               </div>
 
-              <div style={{ height: 1, background: F.line, margin: '14px -18px' }} />
+              {/* Expired KIMPER → yellow warning, still allowed (dispatcher override). */}
+              {(profile.kimper_status === 'EXPIRED' || profile.kimper_status === 'NO_KIMPER' ||
+                profile.kimper_status === 'EXPIRING_SOON' || profile.kimper_status === 'NO_DATE') && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 13, color: '#fcd34d',
+                              background: 'rgba(245,158,11,0.10)', border: `1px solid rgba(245,158,11,0.40)`,
+                              borderRadius: 12, padding: '11px 14px', fontSize: '0.88rem', fontWeight: 600 }}>
+                  <span style={{ fontSize: '1.1rem' }}>🪪</span>
+                  {profile.kimper_status === 'EXPIRED' || profile.kimper_status === 'NO_KIMPER'
+                    ? dt('kimper_warn_expired') : dt('kimper_warn_soon')}
+                </div>
+              )}
+
+              <div style={{ height: 1, background: F.line, margin: '15px -18px' }} />
 
               <div style={fmsLabel}>{dt('authorized_to_operate')}</div>
               {profile.allowed_type_labels.length ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 7 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 9 }}>
                   {profile.allowed_type_labels.map((t) => (
                     <span key={t} style={fmsChip(F.blue)}>{t}</span>
                   ))}
                 </div>
               ) : (
-                <div style={{ color: F.amber, fontSize: '0.84rem', marginTop: 7, fontWeight: 600 }}>
+                <div style={{ color: F.amber, fontSize: '0.92rem', marginTop: 9, fontWeight: 600 }}>
                   {dt('no_authorization')}
                 </div>
               )}
             </div>
 
-            {/* unit number → dropdown → auto-detect type → connect.
-                ALWAYS shown — a driver is never blocked by KIMPER from connecting;
-                an advisory note appears below when the licence does not list it. */}
+            {/* unit number → live truck card → connect. */}
             <div style={fmsCard}>
               <label style={fmsLabel}>{dt('which_unit')}</label>
-              <div style={{ position: 'relative', marginTop: 7 }}>
+              <div style={{ position: 'relative', marginTop: 9 }}>
                 <input
+                  ref={unitInputRef}
                   value={unitNo}
                   onChange={(e) => { setUnitNo(e.target.value.toUpperCase()); setSelectedType(null); setShowDrop(true) }}
                   onFocus={() => setShowDrop(true)}
-                  onKeyDown={(e) => e.key === 'Enter' && connectUnit(unitNo, selectedType)}
+                  onKeyDown={(e) => e.key === 'Enter' && !connectBlocked && connectUnit(unitNo, selectedType)}
                   placeholder={dt('unit_placeholder')}
-                  style={{ ...fmsInput, marginBottom: 0, fontWeight: 700, letterSpacing: '0.04em' }}
+                  autoFocus
+                  style={{ ...fmsInputBig, marginBottom: 0, fontWeight: 800, letterSpacing: '0.05em' }}
                   autoComplete="off"
                 />
                 {showDrop && unitNo.trim() && (suggestions.length > 0 || searching) && (
                   <div style={fmsDrop}>
                     {searching && suggestions.length === 0 && (
-                      <div style={{ padding: '11px 14px', color: F.sub, fontSize: '0.84rem' }}>{dt('searching')}</div>
+                      <div style={{ padding: '13px 16px', color: F.sub, fontSize: '0.92rem' }}>{dt('searching')}</div>
                     )}
                     {suggestions.map((s) => (
-                      <button key={s.unit_no} onClick={() => { setUnitNo(s.unit_no); setSelectedType(s.type); connectUnit(s.unit_no, s.type) }}
+                      <button key={s.unit_no} onClick={() => { setUnitNo(s.unit_no); setSelectedType(s.type); setShowDrop(false) }}
                               style={fmsDropItem}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 999, flexShrink: 0,
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 999, flexShrink: 0,
                                          background: s.live ? F.green : F.sub,
                                          boxShadow: s.live ? `0 0 7px ${F.green}` : 'none' }} />
-                          <span style={{ fontWeight: 800, color: F.ink, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.unit_no}</span>
+                          <span style={{ fontWeight: 800, fontSize: '1rem', color: F.ink, letterSpacing: '0.03em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.unit_no}</span>
                         </span>
                         <span style={fmsChip(fleetTypeColor(s.type))}>{s.type_label}</span>
                       </button>
@@ -777,37 +1031,63 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
                   </div>
                 )}
               </div>
-              <div style={{ color: F.sub, fontSize: '0.76rem', marginTop: 8, marginBottom: 12 }}>
-                {dt('pick_hint')}
-              </div>
-              {supportedAllowed.length === 0 && (
-                <div style={{ color: '#fcd34d', fontSize: '0.78rem', fontWeight: 600, marginTop: -4, marginBottom: 12,
+
+              {/* LIVE TRUCK CARD — appears as you type. */}
+              <TruckPreviewCard preview={unitPreview} loading={unitPreviewLoading} unitNo={unitNo} dt={dt} />
+
+              {!unitNo.trim() && (
+                <div style={{ color: F.sub, fontSize: '0.86rem', marginTop: 10, marginBottom: 12 }}>
+                  {dt('pick_hint')}
+                </div>
+              )}
+              {supportedAllowed.length === 0 && unitNo.trim() && (
+                <div style={{ color: '#fcd34d', fontSize: '0.86rem', fontWeight: 600, marginTop: 10, marginBottom: 4,
                               background: 'rgba(245,158,11,0.10)', border: `1px solid rgba(245,158,11,0.35)`,
-                              borderRadius: 10, padding: '9px 12px' }}>
+                              borderRadius: 10, padding: '10px 13px' }}>
                   ⚠ {dt('not_auth_advisory')}
                 </div>
               )}
-              <button onClick={() => connectUnit(unitNo, selectedType)} disabled={loading || !unitNo.trim()}
-                      style={fmsPrimaryBtn(loading || !unitNo.trim())}>
-                {loading ? dt('connecting') : selectedType
-                  ? `${dt('connect')} ${unitNo} · ${selectedType === 'excavator' ? dt('excavator')
-                      : selectedType === 'dump_truck' ? dt('dump_truck')
-                      : equipmentTypeLabel(selectedType)}`
-                  : dt('connect')}
+
+              <button onClick={() => connectUnit(unitNo, selectedType)} disabled={loading || !unitNo.trim() || connectBlocked}
+                      style={{ ...fmsBigPrimaryBtn(loading || !unitNo.trim() || connectBlocked), marginTop: 14 }}>
+                {loading ? dt('connecting')
+                  : connectBlocked ? dt('unit_unavailable')
+                  : `${dt('connect_to')} ${unitNo.trim() || dt('unit_word')}`}
               </button>
             </div>
 
-            <button onClick={reset} style={fmsGhostBtn}>{dt('different_emp')}</button>
+            <button onClick={backToOperator} style={fmsGhostBtnBig}>{dt('different_emp')}</button>
           </>
         )}
 
         {error && (
           <div style={{ ...fmsCard, borderColor: 'rgba(239,68,68,0.5)', background: 'rgba(239,68,68,0.08)',
-                        color: '#fca5a5', fontWeight: 600, fontSize: '0.86rem' }}>
-            {error}
+                        color: '#fca5a5', fontWeight: 600, fontSize: '0.95rem', display: 'flex',
+                        alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.2rem' }}>⚠</span>{error}
           </div>
         )}
       </div>
+
+      {/* ── FULL-SCREEN "CONNECTING…" SPLASH ── */}
+      {connecting && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(5,8,14,0.94)',
+                      backdropFilter: 'blur(4px)', display: 'flex', flexDirection: 'column',
+                      alignItems: 'center', justifyContent: 'center', gap: 26 }} className="fade-in">
+          <img src={prismLogo} alt="PRISM" style={{ height: 54, width: 'auto', opacity: 0.95 }} className="pulse" />
+          <Spinner size={64} color={F.gold} />
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ color: F.ink, fontWeight: 800, fontSize: '1.4rem', letterSpacing: '0.01em' }}>
+              {dt('connecting_splash')}
+            </div>
+            {unitNo.trim() && (
+              <div style={{ color: F.gold, fontWeight: 800, fontSize: '1.1rem', marginTop: 6, letterSpacing: '0.05em' }}>
+                {unitNo.trim().toUpperCase()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1755,11 +2035,6 @@ const fmsLabel: React.CSSProperties = {
   display: 'block', fontSize: '0.74rem', fontWeight: 800, color: F.sub,
   textTransform: 'uppercase', letterSpacing: '0.06em',
 }
-const fmsInput: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '15px 15px', fontSize: '1.1rem',
-  color: F.ink, background: F.bg2, border: `1px solid ${F.line2}`, borderRadius: 12,
-  marginBottom: 14, outline: 'none', WebkitTextFillColor: F.ink as unknown as string,
-}
 const fmsDrop: React.CSSProperties = {
   position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 20,
   background: F.panelHi, border: `1px solid ${F.line2}`, borderRadius: 12,
@@ -1770,19 +2045,211 @@ const fmsDropItem: React.CSSProperties = {
   padding: '12px 14px', background: 'transparent', border: 'none', borderBottom: `1px solid ${F.line}`,
   cursor: 'pointer', textAlign: 'left',
 }
-function fmsPrimaryBtn(disabled: boolean): React.CSSProperties {
+// ── Industrial sign-on: gloves-size inputs/buttons (>=64px targets, 22px+ text) ──
+const fmsInputBig: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '18px 18px', fontSize: '1.4rem', minHeight: 64,
+  color: F.ink, background: F.bg2, border: `2px solid ${F.line2}`, borderRadius: 14,
+  marginBottom: 14, outline: 'none', WebkitTextFillColor: F.ink as unknown as string,
+  fontWeight: 700, caretColor: F.gold,
+}
+function fmsBigPrimaryBtn(disabled: boolean): React.CSSProperties {
   return {
-    width: '100%', padding: '15px', fontSize: '1.02rem', fontWeight: 800, letterSpacing: '0.01em',
-    color: disabled ? '#64748b' : '#1a1205',
+    width: '100%', minHeight: 68, padding: '18px 16px', fontSize: '1.22rem', fontWeight: 800,
+    letterSpacing: '0.01em', color: disabled ? '#64748b' : '#1a1205',
     background: disabled ? '#1f2937' : `linear-gradient(180deg, ${F.goldHi}, ${F.gold})`,
-    border: disabled ? `1px solid ${F.line}` : 'none', borderRadius: 12,
-    cursor: disabled ? 'default' : 'pointer', marginTop: 2,
+    border: disabled ? `1px solid ${F.line}` : 'none', borderRadius: 14,
+    cursor: disabled ? 'default' : 'pointer', marginTop: 4,
     boxShadow: disabled ? 'none' : '0 8px 22px rgba(245,165,36,0.28)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
   }
 }
-const fmsGhostBtn: React.CSSProperties = {
-  width: '100%', padding: '13px', fontSize: '0.9rem', fontWeight: 700, color: F.sub,
-  background: 'transparent', border: `1px solid ${F.line}`, borderRadius: 12, marginTop: 2, cursor: 'pointer',
+const fmsGhostBtnBig: React.CSSProperties = {
+  width: '100%', minHeight: 64, padding: '16px', fontSize: '1.02rem', fontWeight: 700, color: F.sub2,
+  background: 'transparent', border: `1px solid ${F.line2}`, borderRadius: 14, cursor: 'pointer',
+}
+// First word of a name (for "Continue as <FirstName>" on the confirm button).
+function firstWord(name?: string): string {
+  return (name || '').trim().split(/\s+/)[0] || ''
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  STEP 1 — LIVE OPERATOR PREVIEW CARD (appears as the ID is typed)
+//  Soft-green tint when an operator is resolved, red tint on "not found",
+//  neutral while loading. Shows name, dept, KIMPER pill, initials avatar.
+// ════════════════════════════════════════════════════════════════════════
+function OperatorPreviewCard({ employeeId, preview, loading, offline, error, dt }:
+  { employeeId: string; preview: Profile | null; loading: boolean; offline: boolean
+    error: string | null; dt: (k: string) => string }) {
+  const typed = employeeId.trim()
+  if (!typed) {
+    // Empty state — soft grey placeholder.
+    return (
+      <div style={{ ...previewShell(F.line2), color: F.sub, fontSize: '1rem', fontWeight: 600,
+                    display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', minHeight: 76 }}>
+        <span style={{ fontSize: '1.2rem', opacity: 0.7 }}>👤</span>{dt('enter_emp_id')}
+      </div>
+    )
+  }
+  if (error && !preview) {
+    return (
+      <div className="shake" style={{ ...previewShell(F.red), background: 'rgba(220,38,38,0.10)',
+                    display: 'flex', alignItems: 'center', gap: 12, minHeight: 76 }}>
+        <span style={{ fontSize: '1.4rem' }}>⚠</span>
+        <span style={{ color: '#fca5a5', fontWeight: 700, fontSize: '1rem' }}>{error}</span>
+      </div>
+    )
+  }
+  if (!preview) {
+    // Loading.
+    return (
+      <div style={{ ...previewShell(F.line2), display: 'flex', alignItems: 'center', gap: 14, minHeight: 76 }}>
+        <Spinner size={26} />
+        <span style={{ color: F.sub, fontWeight: 600, fontSize: '1rem' }}>{dt('checking')}</span>
+      </div>
+    )
+  }
+  const kc = statusColor(preview.kimper_status)
+  return (
+    <div className="fade-in" style={{ ...previewShell(F.green), background: 'rgba(34,197,94,0.07)',
+                  display: 'flex', alignItems: 'center', gap: 14, minHeight: 76 }}>
+      <div style={{ width: 56, height: 56, borderRadius: 14, flexShrink: 0, position: 'relative',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.3rem', fontWeight: 800, color: F.gold,
+                    background: 'rgba(245,165,36,0.14)', border: `1px solid rgba(245,165,36,0.4)` }}>
+        {initialsOf(preview.name, preview.employee_id)}
+        {loading && <span style={{ position: 'absolute', right: -4, bottom: -4 }}><Spinner size={16} /></span>}
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: '1.22rem', fontWeight: 800, color: F.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {preview.name || '—'}
+        </div>
+        {[preview.company, preview.department].filter(Boolean).length > 0 && (
+          <div style={{ color: F.sub, fontSize: '0.92rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {[preview.company, preview.department].filter(Boolean).join(' · ')}
+          </div>
+        )}
+        {offline && <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 4,
+                      color: F.amber, fontSize: '0.76rem', fontWeight: 700 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: F.amber }} />{dt('offline_mode')}
+        </div>}
+      </div>
+      <span style={{ ...fmsPill(kc), alignSelf: 'flex-start', fontSize: '0.78rem' }}>
+        KIMPER {preview.kimper_status || '—'}
+      </span>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  STEP 2 — LIVE TRUCK PREVIEW CARD (appears as the unit number is typed)
+//  Shows model/type, status (Idle/Active/Maintenance/etc.), assigned shovel,
+//  and any operator already connected. Green tint = available, red = blocked.
+// ════════════════════════════════════════════════════════════════════════
+function TruckPreviewCard({ preview, loading, unitNo, dt }:
+  { preview: UnitPreview | null; loading: boolean; unitNo: string; dt: (k: string) => string }) {
+  const typed = unitNo.trim()
+  if (!typed) return null
+  if (!preview) {
+    return (
+      <div style={{ ...previewShell(F.line2), marginTop: 12, display: 'flex', alignItems: 'center',
+                    gap: 14, minHeight: 72 }}>
+        <Spinner size={26} color={F.blue} />
+        <span style={{ color: F.sub, fontWeight: 600, fontSize: '1rem' }}>{dt('searching')}</span>
+      </div>
+    )
+  }
+  // Status semantics: a manual non-operating status wins; otherwise derive from
+  // live/cycle. maintenance/breakdown OR another operator → blocked (red).
+  const blocked = preview.manual_status === 'maintenance' || preview.manual_status === 'breakdown' || !!preview.current_operator
+  const statusInfo = truckStatusInfo(preview, dt)
+  const tint = blocked ? F.red : (statusInfo.tone === 'active' ? F.green : statusInfo.tone === 'idle' ? F.blue : F.amber)
+  const fleetTint = fleetTypeColor(preview.type || undefined)
+  return (
+    <div className="fade-in" style={{ ...previewShell(tint), marginTop: 12,
+                  background: blocked ? 'rgba(220,38,38,0.08)' : 'rgba(56,189,248,0.06)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 14, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.7rem',
+                      background: `${fleetTint}1F`, border: `1px solid ${fleetTint}59` }}>
+          {preview.type === 'excavator' ? '⛏' : preview.type === 'dump_truck' ? '🚛' : '🚜'}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: '1.3rem', fontWeight: 800, color: F.ink, letterSpacing: '0.04em',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {preview.unit_no}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 4, flexWrap: 'wrap' }}>
+            {preview.type_label ? <span style={fmsChip(fleetTint)}>{preview.type_label}</span> : null}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 800,
+                           color: statusInfo.color }}>
+              <span style={{ width: 9, height: 9, borderRadius: 999, background: statusInfo.color,
+                             boxShadow: `0 0 7px ${statusInfo.color}` }} />
+              {statusInfo.label}
+            </span>
+          </div>
+        </div>
+        {loading && <Spinner size={18} color={F.blue} />}
+      </div>
+
+      {/* secondary details: assigned shovel + cycle stage */}
+      {(preview.assigned_shovel || preview.cycle_label) && !blocked && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          {preview.assigned_shovel && (
+            <span style={miniFact}>⛏ {dt('assigned_shovel')}: <b style={{ color: F.ink }}>{preview.assigned_shovel}</b></span>
+          )}
+          {preview.cycle_label && (
+            <span style={miniFact}>● {preview.cycle_label}</span>
+          )}
+        </div>
+      )}
+
+      {/* BLOCKING messages — actionable, specific. */}
+      {preview.current_operator && (
+        <div style={{ marginTop: 12, color: '#fca5a5', fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.4 }}>
+          {preview.unit_no} {dt('already_connected_to')} {preview.current_operator}. {dt('contact_dispatcher')}
+        </div>
+      )}
+      {!preview.current_operator && (preview.manual_status === 'maintenance' || preview.manual_status === 'breakdown') && (
+        <div style={{ marginTop: 12, color: '#fca5a5', fontWeight: 700, fontSize: '0.92rem', lineHeight: 1.4 }}>
+          {preview.unit_no} {preview.manual_status === 'maintenance' ? dt('under_maintenance') : dt('is_down')}.
+          {' '}{dt('request_different')}
+        </div>
+      )}
+      {/* advisory (non-blocking) manual status — delay / standby */}
+      {!blocked && (preview.manual_status === 'delay' || preview.manual_status === 'standby') && (
+        <div style={{ marginTop: 10, color: '#fcd34d', fontWeight: 600, fontSize: '0.86rem' }}>
+          ⚠ {dt('ms_' + preview.manual_status)}{preview.manual_reason ? ` · ${preview.manual_reason}` : ''}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Derive the in-cab status label/colour/tone for the truck card from the live
+// resolve-unit / equipment-status data (existing endpoints only).
+function truckStatusInfo(p: UnitPreview, dt: (k: string) => string): { label: string; color: string; tone: 'active' | 'idle' | 'warn' } {
+  if (p.manual_status === 'maintenance') return { label: dt('status_maintenance'), color: F.red, tone: 'warn' }
+  if (p.manual_status === 'breakdown') return { label: dt('ms_breakdown'), color: F.red, tone: 'warn' }
+  if (p.manual_status === 'delay') return { label: dt('ms_delay'), color: F.amber, tone: 'warn' }
+  if (p.manual_status === 'standby') return { label: dt('ms_standby'), color: F.amber, tone: 'warn' }
+  if (p.current_operator) return { label: dt('status_in_use'), color: F.amber, tone: 'warn' }
+  if (p.cycle_label) return { label: dt('status_active'), color: F.green, tone: 'active' }
+  if (p.live) return { label: dt('status_idle'), color: F.blue, tone: 'idle' }
+  if (p.found) return { label: dt('status_offline'), color: F.sub, tone: 'idle' }
+  return { label: dt('status_not_in_feed'), color: F.sub, tone: 'idle' }
+}
+
+// Shared shell for the preview cards — rounded, elevated, tinted border.
+function previewShell(borderColor: string): React.CSSProperties {
+  return {
+    marginTop: 6, marginBottom: 6, borderRadius: 14, padding: '14px 16px',
+    background: F.panelHi, border: `1.5px solid ${borderColor}66`,
+    boxShadow: '0 6px 18px rgba(0,0,0,0.28)',
+  }
+}
+const miniFact: React.CSSProperties = {
+  fontSize: '0.82rem', fontWeight: 600, color: F.sub2, background: F.bg2,
+  border: `1px solid ${F.line}`, borderRadius: 9, padding: '6px 10px', whiteSpace: 'nowrap',
 }
 function fmsPill(color: string): React.CSSProperties {
   return { fontSize: '0.68rem', fontWeight: 800, color, background: `${color}22`,

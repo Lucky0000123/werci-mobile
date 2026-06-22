@@ -7,6 +7,26 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.49.0 — Industrial in-cab sign-on redesign (gloves + moving-truck friendly).
+ *          Both steps now show a LIVE PREVIEW CARD as you type (debounced 350ms):
+ *          Step 1 resolves the Employee ID to an operator card (name, department,
+ *          KIMPER status pill, initials avatar, Offline-Mode badge) BEFORE you
+ *          commit — the confirm button reads "Continue as <FirstName>"; a wrong ID
+ *          shows a red inline "Employee ID not found" instead of a dead end. Step 2
+ *          resolves the unit number to a live TRUCK CARD (type, Idle/Active/
+ *          Maintenance/In-use status dot, assigned shovel, current haul stage) from
+ *          existing endpoints only (resolve-unit + equipment-status + board). It
+ *          BLOCKS connect with a specific message when the truck is already
+ *          connected to another operator ("DT-047 is currently connected to
+ *          <Name>. Contact your dispatcher.") or under maintenance/breakdown
+ *          ("...under maintenance. Please request a different truck."), and shows a
+ *          yellow advisory for expired KIMPER while still allowing sign-on
+ *          (dispatcher override). Gloves-size targets throughout (>=64px inputs &
+ *          buttons, 22px+ text), keyboard avoidance (visualViewport inset keeps the
+ *          focused field + its card above the on-screen keyboard), auto-focus on
+ *          each step, and a full-screen "Connecting…" splash before the operator
+ *          window opens. EN/ID/ZH strings added. Frontend-only — no backend/endpoint
+ *          changes; the connect/identify wiring and session handling are unchanged.
  * 2.48.0 — Cab top-bar + map decluttered to ICONS, not sentences. (1) The
  *          connect advisories that used to spell out a full line each ("Not on
  *          KIMPER for this equipment", "Unit currently offline in GPS", ...) now
@@ -401,4 +421,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.48.0'
+export const APP_VERSION = '2.49.0'
