@@ -7,6 +7,18 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.50.0 — Excavator tablet fixes for the production haul-cycle simulator. The
+ *          excavator OUI is loading-control only: (1) tapping FULL no longer shows
+ *          a "DT-SIM-X Full Travel" message (or any truck travel-state text); the
+ *          post-FULL confirmation reads "Loaded / Departed". (2) Multi-truck: the
+ *          NOW LOADING strip + load timer re-anchor when the loading truck changes
+ *          (Truck 1 -> 2 -> 3) and the stale FULL banner clears, so the panel
+ *          always shows the CURRENTLY loading truck, never the previous one. (3)
+ *          The placeholder shows a clean yellow WAITING when no truck is under the
+ *          bucket and switches to pink NOW LOADING + truck number on First Bucket;
+ *          the header pill maps idle->Waiting for a connected/planned excavator.
+ *          (Backend: new SIM_SESSION_LOG + Session Report, road-following sim,
+ *          auto First Bucket with manual FULL — all server-side.)
  * 2.49.0 — Industrial in-cab sign-on redesign (gloves + moving-truck friendly).
  *          Both steps now show a LIVE PREVIEW CARD as you type (debounced 350ms):
  *          Step 1 resolves the Employee ID to an operator card (name, department,
@@ -421,4 +433,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.49.0'
+export const APP_VERSION = '2.50.0'
