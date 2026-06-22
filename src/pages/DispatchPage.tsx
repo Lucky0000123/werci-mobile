@@ -306,6 +306,11 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
       } else {
         setConnectedUnit(u)
         setResult(data)
+        // Tag GPS posts with this operator/unit so multiple cab tablets on one
+        // shared login account each keep their own position on the map.
+        void import('../services/locationShare')
+          .then((m) => m.setConnectedScope({ employeeId: profile.employee_id, unitNo: u }))
+          .catch(() => { /* location share unavailable */ })
       }
     } catch {
       setError(online ? dt('network_err') : dt('offline_connect'))
@@ -326,6 +331,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         payload: { employee_id },
       })
       setResult(null); setConnectedUnit('')
+      void import('../services/locationShare')
+        .then((m) => m.setConnectedScope(null))
+        .catch(() => { /* noop */ })
       await identify()      // refresh — active_assignment cleared
     } catch {
       setError('Network error — could not disconnect')
@@ -337,6 +345,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   function reset() {
     setEmployeeId(''); setProfile(null); setUnitNo(''); setSelectedType(null)
     setSuggestions([]); setShowDrop(false); setError(null); setResult(null); setConnectedUnit('')
+    void import('../services/locationShare')
+      .then((m) => m.setConnectedScope(null))
+      .catch(() => { /* noop */ })
   }
 
   // The active connection drives which operator window opens (from a fresh
@@ -368,6 +379,17 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     else document.body.classList.remove('oui-locked')
     return () => document.body.classList.remove('oui-locked')
   }, [ouiOpen])
+
+  // Keep the GPS-post scope in sync with the active connection (covers a tablet
+  // that reopens already-connected via identify, not just a fresh connect), so
+  // every cab tablet on the shared login account always tags its own unit.
+  useEffect(() => {
+    const emp = profile?.employee_id
+    const unit = connection?.unit_no
+    void import('../services/locationShare')
+      .then((m) => m.setConnectedScope(emp && unit ? { employeeId: emp, unitNo: unit } : null))
+      .catch(() => { /* noop */ })
+  }, [profile?.employee_id, connection?.unit_no])
 
   // ── connected: full-screen operator window ──
   if (profile && connection) {
@@ -1129,6 +1151,17 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                 <div style={{ color: D.ink, fontWeight: 900, fontSize: '1.5rem' }}>{dt('ms_' + manual!.status)}</div>
                 {manual?.reason && <div style={{ color: D.sub2, fontSize: '0.92rem', marginTop: 6 }}>{dt('reason')}: {manual.reason}</div>}
                 <div style={{ color: D.sub, fontSize: '0.85rem', marginTop: 8 }}>{dt('out_of_cycle')}</div>
+                {/* The Operator Action panel (which hosts the status trigger) is
+                    hidden while non-operating, so expose a direct way back to the
+                    cycle right here — otherwise the truck is stuck in breakdown/
+                    standby with no path to resume (the status modal's own
+                    Return-to-Operating button is unreachable once this banner shows). */}
+                <button onClick={() => setStatusOpen(true)}
+                        style={{ marginTop: 18, padding: '14px 24px', borderRadius: 14, border: 'none',
+                                 background: '#22C55E', color: '#04130a', fontWeight: 900, fontSize: '1.05rem',
+                                 cursor: 'pointer', boxShadow: '0 6px 18px rgba(34,197,94,0.35)' }}>
+                  {dt('return_operating')}
+                </button>
               </div>
             ) : (
               <>

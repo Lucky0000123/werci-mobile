@@ -125,6 +125,22 @@ interface NormalizedFix {
 
 let lastFix: NormalizedFix | null = null
 
+// In-cab disambiguator. Several cab tablets share ONE login account, so the
+// server cannot tell them apart by user_id — their GPS would collapse onto a
+// single position. While an operator is connected to a unit, the cab tags every
+// position post with the connected employee_id + unit_no so each tablet keeps
+// its own position slot on the server (and the fleet overlay can join by the
+// operator/unit). Cleared on disconnect.
+let connectedScope: { employeeId?: string; unitNo?: string } | null = null
+
+/**
+ * Tag (or clear) the connected operator/unit for in-cab position posts. Call on
+ * connect with {employeeId, unitNo}; call with null on disconnect.
+ */
+export function setConnectedScope(scope: { employeeId?: string; unitNo?: string } | null): void {
+  connectedScope = scope && (scope.employeeId || scope.unitNo) ? scope : null
+}
+
 export type DeviceFix = NormalizedFix
 
 /**
@@ -178,6 +194,10 @@ async function postPosition(fix: NormalizedFix, opts: { force?: boolean } = {}):
       speed: fix.speed ?? undefined,
       heading: fix.heading ?? undefined,
       ts: fix.ts,
+      // In-cab: tag the connected operator/unit so multiple tablets on one shared
+      // login account each keep their own server-side position slot.
+      employee_id: connectedScope?.employeeId,
+      unit_no: connectedScope?.unitNo,
     }
     const res = await apiFetch('/api/mobile/location', {
       method: 'POST',

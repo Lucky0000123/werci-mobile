@@ -7,6 +7,15 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.43.0 — OUI field-test fixes. (1) Truck OUI: after a manual non-operating
+ *          status (breakdown/standby/delay/maintenance) the only way back to the
+ *          cycle was unreachable; added a direct "Return to Operating" button in
+ *          the status banner. (2) Multi-tablet GPS: several cab tablets share one
+ *          login account, so the in-cab now tags every GPS post with the
+ *          CONNECTED employee_id + unit_no (locationShare.setConnectedScope) so
+ *          each tablet keeps its own map position instead of colliding on one
+ *          shared account slot (pairs with the web v29 employee-scoped position
+ *          keying). Header reads "WBN FMS".
  * 2.42.0 — In-cab OUI header re-branded from "PRISM FMS" to "WBN FMS". (Pairs
  *          with the web v27 KIMPER licence gate: NO_KIMPER / EXPIRED / NO_DATE
  *          now hard-block a pairing server-side, so this APK already enforces it.)
@@ -347,4 +356,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.42.0'
+export const APP_VERSION = '2.43.0'
