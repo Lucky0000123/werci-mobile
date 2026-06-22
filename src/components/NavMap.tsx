@@ -68,6 +68,18 @@ function destEl(color: string): HTMLDivElement {
   el.style.cssText = `width:16px;height:16px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6);`
   return el
 }
+// A labelled flag for the FIXED assigned loading area (its own coordinates),
+// shown next to the live shovel marker on the empty leg.
+function loadFlagEl(label: string): HTMLDivElement {
+  const el = document.createElement('div')
+  const safe = label.replace(/</g, '&lt;')
+  el.style.cssText = 'display:flex;flex-direction:column;align-items:center;'
+  el.innerHTML =
+    `<div style="background:#15803D;color:#fff;font:700 10px/1 -apple-system,sans-serif;padding:3px 6px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.6);border:1px solid #22C55E">${safe}</div>` +
+    `<div style="width:2px;height:14px;background:#22C55E"></div>` +
+    `<div style="width:12px;height:12px;border-radius:50%;background:#22C55E;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6);margin-top:-1px"></div>`
+  return el
+}
 
 function NavMap(props: DispatchMapProps) {
   const { height = 260 } = props
@@ -75,6 +87,7 @@ function NavMap(props: DispatchMapProps) {
   const mapRef = useRef<maplibregl.Map | null>(null)
   const vehRef = useRef<maplibregl.Marker | null>(null)
   const destMkRef = useRef<maplibregl.Marker | null>(null)
+  const loadMkRef = useRef<maplibregl.Marker | null>(null)
   const propsRef = useRef(props); propsRef.current = props
   const fittedRef = useRef('')
   const [ready, setReady] = useState(false)
@@ -181,7 +194,7 @@ function NavMap(props: DispatchMapProps) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const { truck, dest, geofenceM, route, routeSegments, roads, rings, destKind = 'dump', stateColor = '#38BDF8' } = propsRef.current
+    const { truck, dest, loadingDest, loadingLabel, geofenceM, route, routeSegments, roads, rings, destKind = 'dump', stateColor = '#38BDF8' } = propsRef.current
 
     // Route source: prefer the curated loaded/empty LANE segments (each tagged
     // `lane` → coloured by the line layer); else the plain fallback line.
@@ -222,6 +235,22 @@ function NavMap(props: DispatchMapProps) {
       else { destMkRef.current.setLngLat([dest.lng, dest.lat]); (destMkRef.current.getElement() as HTMLElement).style.background = dc }
     } else if (destMkRef.current) { destMkRef.current.remove(); destMkRef.current = null }
 
+    // FIXED loading-area flag (planned named location), shown alongside the live
+    // shovel `dest` on the empty leg only. Recreated when the label changes so
+    // the flag text stays correct.
+    if (loadingDest && destKind === 'loading' && isFinite(loadingDest.lat) && isFinite(loadingDest.lng)) {
+      const lbl = loadingLabel || 'Loading'
+      if (loadMkRef.current && loadMkRef.current.getElement().dataset.lbl !== lbl) {
+        loadMkRef.current.remove(); loadMkRef.current = null
+      }
+      if (!loadMkRef.current) {
+        const el = loadFlagEl(lbl); el.dataset.lbl = lbl
+        loadMkRef.current = new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([loadingDest.lng, loadingDest.lat]).addTo(map)
+      } else {
+        loadMkRef.current.setLngLat([loadingDest.lng, loadingDest.lat])
+      }
+    } else if (loadMkRef.current) { loadMkRef.current.remove(); loadMkRef.current = null }
+
     // camera: NAV mode follows the truck (pitched + heading-up, road-in-front);
     // otherwise fit once to show the truck + destination overview (flat).
     const navMode = !!(((routeSegments && routeSegments.length) || (route && route.length >= 2)) && truck)
@@ -235,6 +264,7 @@ function NavMap(props: DispatchMapProps) {
         if (truck && dest) {
           const b = new maplibregl.LngLatBounds([truck.lng, truck.lat], [truck.lng, truck.lat])
           b.extend([dest.lng, dest.lat])
+          if (loadingDest && destKind === 'loading') b.extend([loadingDest.lng, loadingDest.lat])
           map.fitBounds(b, { padding: 60, pitch: 0, bearing: 0, maxZoom: 16, duration: 600 })
         } else if (truck) {
           map.easeTo({ center: [truck.lng, truck.lat], zoom: 15, pitch: 0, bearing: 0, duration: 600 })
@@ -242,6 +272,7 @@ function NavMap(props: DispatchMapProps) {
       }
     }
   }, [ready, props.truck?.lat, props.truck?.lng, props.truck?.course, props.dest?.lat, props.dest?.lng,
+      props.loadingDest?.lat, props.loadingDest?.lng, props.loadingLabel,
       props.geofenceM, props.destKind, props.stateColor, props.route, props.routeSegments, props.roads, props.rings])
 
   if (glFailed) return <DispatchMap {...props} />

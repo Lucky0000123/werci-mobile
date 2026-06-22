@@ -19,6 +19,12 @@ export interface ZoneRing {
 export interface DispatchMapProps {
   truck: { lat: number; lng: number; course?: number | null } | null
   dest: { lat: number; lng: number } | null
+  // The FIXED assigned loading area (its own named-location coordinates), shown
+  // as a static labelled flag ALONGSIDE the live shovel `dest` on the empty leg.
+  // The shovel (`dest`) is the real moving load point; this is the planned area.
+  // Null when unassigned, on the full leg, or when the location has no coords.
+  loadingDest?: { lat: number; lng: number } | null
+  loadingLabel?: string | null
   geofenceM?: number | null
   lane: 'full' | 'empty'
   destKind?: 'loading' | 'dump'
@@ -38,11 +44,11 @@ export interface DispatchMapProps {
 const NAV_ZOOM = 16
 
 function DispatchMap({
-  truck, dest, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, rings, height = 260, visible,
+  truck, dest, loadingDest, loadingLabel, geofenceM, lane, destKind = 'dump', stateColor = '#38BDF8', route, roads, rings, height = 260, visible,
 }: DispatchMapProps) {
   const elRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
-  const layers = useRef<{ truck?: L.Marker; dest?: L.Marker; geo?: L.Circle; rings?: L.Circle[]; line?: L.Polyline; nav?: L.LayerGroup; roads?: L.GeoJSON }>({})
+  const layers = useRef<{ truck?: L.Marker; dest?: L.Marker; loadDest?: L.Marker; geo?: L.Circle; rings?: L.Circle[]; line?: L.Polyline; nav?: L.LayerGroup; roads?: L.GeoJSON }>({})
   const fittedKey = useRef<string>('')
 
   useEffect(() => {
@@ -155,6 +161,20 @@ function DispatchMap({
       if (ls.rings) { ls.rings.forEach((c) => c.remove()); ls.rings = undefined }
     }
 
+    // FIXED loading-area flag — the planned named loading location, drawn as a
+    // static green flag with its label, separate from the live shovel `dest`.
+    // Only on the empty leg (destKind 'loading'); hidden when full or unassigned.
+    if (loadingDest && destKind === 'loading' && isFinite(loadingDest.lat) && isFinite(loadingDest.lng)) {
+      const lbl = (loadingLabel || 'Loading').replace(/</g, '&lt;')
+      const lhtml = `<div style="display:flex;flex-direction:column;align-items:center;transform:translateY(-50%)">` +
+        `<div style="background:#15803D;color:#fff;font:700 10px/1 -apple-system,sans-serif;padding:3px 6px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.6);border:1px solid #22C55E">${lbl}</div>` +
+        `<div style="width:2px;height:14px;background:#22C55E"></div>` +
+        `<div style="width:12px;height:12px;border-radius:50%;background:#22C55E;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.6);margin-top:-1px"></div></div>`
+      const licon = L.divIcon({ html: lhtml, className: '', iconSize: [80, 40], iconAnchor: [40, 40] })
+      if (ls.loadDest) ls.loadDest.setLatLng([loadingDest.lat, loadingDest.lng]).setIcon(licon)
+      else ls.loadDest = L.marker([loadingDest.lat, loadingDest.lng], { icon: licon, zIndexOffset: 500 }).addTo(map)
+    } else if (ls.loadDest) { ls.loadDest.remove(); ls.loadDest = undefined }
+
     // straight fallback line only when there's no road route
     if (truck && dest && !(route && route.length >= 2)) {
       const lineColor = lane === 'full' ? '#38BDF8' : '#CBD5E1'
@@ -172,11 +192,14 @@ function DispatchMap({
       const key = dest ? `${dest.lat.toFixed(5)},${dest.lng.toFixed(5)}` : (truck ? 't' : '')
       if (key && key !== fittedKey.current) {
         fittedKey.current = key
-        if (truck && dest) map.fitBounds(L.latLngBounds([[truck.lat, truck.lng], [dest.lat, dest.lng]]).pad(0.45), { maxZoom: 16 })
-        else if (truck) map.setView([truck.lat, truck.lng], 15)
+        if (truck && dest) {
+          const b = L.latLngBounds([[truck.lat, truck.lng], [dest.lat, dest.lng]])
+          if (loadingDest && destKind === 'loading') b.extend([loadingDest.lat, loadingDest.lng])
+          map.fitBounds(b.pad(0.45), { maxZoom: 16 })
+        } else if (truck) map.setView([truck.lat, truck.lng], 15)
       }
     }
-  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, geofenceM, lane, destKind, stateColor, route, rings])
+  }, [truck?.lat, truck?.lng, truck?.course, dest?.lat, dest?.lng, loadingDest?.lat, loadingDest?.lng, loadingLabel, geofenceM, lane, destKind, stateColor, route, rings])
 
   return (
     <div

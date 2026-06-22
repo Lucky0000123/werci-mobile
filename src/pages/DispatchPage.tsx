@@ -64,6 +64,12 @@ type UnitSuggestion = {
 }
 
 const SUPPORTED_TYPES = ['excavator', 'dump_truck']
+// App-only ancillary equipment (no onboard TMS/GPS) — these sign on through the
+// OUI via /connect-equipment and open the lightweight status-only panel instead
+// of a haul-cycle window.
+const EQUIPMENT_TYPES = ['grader', 'dozer', 'compactor', 'loader', 'light_vehicle', 'other']
+const CONNECT_TYPES = [...SUPPORTED_TYPES, ...EQUIPMENT_TYPES]
+const isEquipmentType = (t?: string | null) => !!t && EQUIPMENT_TYPES.includes(t)
 
 /**
  * setInterval that PAUSES while the tab/app is backgrounded and resumes (with an
@@ -189,6 +195,16 @@ const STATUS_REASONS: Record<string, string[]> = {
 }
 function manualMeta(s?: string) { return MANUAL_STATUSES.find((m) => m.value === s) }
 
+// Display labels for the app-only ancillary equipment types (used by the
+// equipment status panel header). Mirrors the backend EQUIPMENT_TYPE_LABELS.
+const EQUIPMENT_TYPE_LABELS: Record<string, string> = {
+  grader: 'Grader', dozer: 'Dozer', compactor: 'Compactor',
+  loader: 'Loader', light_vehicle: 'Light Vehicle', other: 'Equipment',
+}
+function equipmentTypeLabel(t?: string) {
+  return (t && EQUIPMENT_TYPE_LABELS[t]) || 'Equipment'
+}
+
 function statusColor(s?: string) {
   if (s === 'EXPIRED' || s === 'NO_KIMPER') return C.red
   if (s === 'EXPIRING_SOON' || s === 'NO_DATE') return C.amber
@@ -287,10 +303,11 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     setSearching(true)
     const h = setTimeout(async () => {
       try {
-        // Always offer ALL supported equipment (excavator + dump_truck). KIMPER
-        // authorization never limits what a driver may connect to — it only adds
-        // an advisory warning on connect.
-        const types = SUPPORTED_TYPES.join(',')
+        // Offer ALL connectable equipment — the haul fleet (excavator,
+        // dump_truck) plus app-only ancillary gear (grader, dozer, ...). KIMPER
+        // authorization never limits what may be connected; it only adds an
+        // advisory warning on connect.
+        const types = CONNECT_TYPES.join(',')
         const r = await apiFetch(`/api/dispatch/units?q=${encodeURIComponent(q)}&types=${types}&limit=10`)
         const d = await r.json()
         if (!alive) return
@@ -311,7 +328,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     setShowDrop(false); setLoading(true); setError(null); setResult(null)
     try {
       let t = type
-      if (!t || !SUPPORTED_TYPES.includes(t)) {
+      if (!t || !CONNECT_TYPES.includes(t)) {
         // detect from the live feed / asset map
         try {
           const rr = await apiFetch(`/api/dispatch/resolve-unit?unit_no=${encodeURIComponent(u)}`)
@@ -319,19 +336,25 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
           t = rd?.tms?.asset_type || null
         } catch { /* offline / unknown */ }
       }
-      // Choose the connect endpoint type. A driver is NEVER blocked here — KIMPER
-      // authorization is advisory only (the server attaches a warning, never
-      // refuses). Resolve the type from: the picked suggestion → live detection →
-      // the operator's single authorized type → fall back to dump_truck.
-      if (!t || !SUPPORTED_TYPES.includes(t)) {
-        if (supportedAllowed.length === 1) t = supportedAllowed[0]            // one authorized type
-        else if (supportedAllowed.length > 1) t = supportedAllowed[0]         // default to first authorized
+      // Choose the connect endpoint type. An operator is NEVER blocked here —
+      // KIMPER authorization is advisory only (the server attaches a warning,
+      // never refuses). Resolve the type from: the picked suggestion → live
+      // detection → the operator's single authorized type → fall back to
+      // dump_truck. Unknown/ancillary types route to the app-only equipment flow.
+      if (!t || !CONNECT_TYPES.includes(t)) {
+        if (supportedAllowed.length >= 1) t = supportedAllowed[0]              // an authorized haul type
         else t = 'dump_truck'                                                 // no auth listed — still allow
       }
-      const path = t === 'excavator' ? '/api/dispatch/connect-excavator' : '/api/dispatch/connect-truck'
+      // Route by family: excavator + dump_truck keep their dedicated pairing
+      // flows; everything else is app-only ancillary equipment (no TMS/GPS).
+      const path = t === 'excavator' ? '/api/dispatch/connect-excavator'
+        : isEquipmentType(t) ? '/api/dispatch/connect-equipment'
+        : '/api/dispatch/connect-truck'
+      const payload: Record<string, unknown> = { employee_id: profile.employee_id, unit_no: u }
+      if (isEquipmentType(t)) payload.unit_type = t     // server keeps the picked ancillary type
       const r = await apiFetch(path, {
         method: 'POST',
-        body: JSON.stringify({ employee_id: profile.employee_id, unit_no: u }),
+        body: JSON.stringify(payload),
       })
       const data = await r.json() as ConnectResult
       if (r.status === 403 && data.authorized === false) {
@@ -429,6 +452,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   // ── connected: full-screen operator window ──
   if (profile && connection) {
     const isExc = connection.unit_type === 'excavator'
+    const isEquip = isEquipmentType(connection.unit_type)   // app-only ancillary gear
     return (
       <div style={{ height: '100dvh', boxSizing: 'border-box', background: D.bg,
                     padding: 8, paddingBottom: 'calc(8px + env(safe-area-inset-bottom, 0px))',
@@ -504,6 +528,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         <div style={{ flex: 1, minHeight: 0 }}>
           {isExc ? (
             <ExcavatorOuiPanel employeeId={profile.employee_id} excavatorNo={connection.unit_no} operatorName={profile.name} />
+          ) : isEquip ? (
+            <EquipmentOuiPanel employeeId={profile.employee_id} unitNo={connection.unit_no}
+                               unitType={connection.unit_type} operatorName={profile.name} />
           ) : (
             <TruckDriverWindow employeeId={profile.employee_id} truckNo={connection.unit_no} driverName={profile.name}
                                viewMode={viewMode} setViewMode={setViewMode} />
@@ -749,7 +776,9 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
               <button onClick={() => connectUnit(unitNo, selectedType)} disabled={loading || !unitNo.trim()}
                       style={fmsPrimaryBtn(loading || !unitNo.trim())}>
                 {loading ? dt('connecting') : selectedType
-                  ? `${dt('connect')} ${unitNo} · ${selectedType === 'excavator' ? dt('excavator') : dt('dump_truck')}`
+                  ? `${dt('connect')} ${unitNo} · ${selectedType === 'excavator' ? dt('excavator')
+                      : selectedType === 'dump_truck' ? dt('dump_truck')
+                      : equipmentTypeLabel(selectedType)}`
                   : dt('connect')}
               </button>
             </div>
@@ -783,6 +812,7 @@ type OpExcavator = {
   loading_location_name?: string | null; dump_location_name?: string | null
   loading_zone_m?: number; waiting_zone_m?: number; discovery_zone_m?: number
   lat?: number | null; lng?: number | null
+  loading_lat?: number | null; loading_lng?: number | null
   dump_lat?: number | null; dump_lng?: number | null; dump_zone_m?: number
   exc_status?: string; exc_status_color?: string; exc_status_label?: string; next_truck_no?: string | null
 } | null
@@ -799,7 +829,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [excavatorNo, setExcavatorNo] = useState<string | null>(null)
   const [loadingLoc, setLoadingLoc] = useState<string | null>(null)
   const [dumpLoc, setDumpLoc] = useState<string | null>(null)
-  const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; waitingZoneM?: number; discoveryZoneM?: number; dumpZoneM?: number }>({})
+  const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; loadLat?: number | null; loadLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; waitingZoneM?: number; discoveryZoneM?: number; dumpZoneM?: number }>({})
   const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number } | null>(null)
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
@@ -903,7 +933,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       setPlanId(exc?.plan_id ?? null); setExcavatorNo(exc?.excavator_no ?? null)
       setLoadingLoc(exc?.loading_location_name ?? null); setDumpLoc(exc?.dump_location_name ?? null)
       setShiftDate(exc?.shift, exc?.plan_date)
-      setGeo({ excLat: exc?.lat, excLng: exc?.lng, dumpLat: exc?.dump_lat, dumpLng: exc?.dump_lng,
+      setGeo({ excLat: exc?.lat, excLng: exc?.lng, loadLat: exc?.loading_lat, loadLng: exc?.loading_lng,
+               dumpLat: exc?.dump_lat, dumpLng: exc?.dump_lng,
                loadingZoneM: exc?.loading_zone_m, waitingZoneM: exc?.waiting_zone_m,
                discoveryZoneM: exc?.discovery_zone_m, dumpZoneM: exc?.dump_zone_m })
     }
@@ -1046,6 +1077,12 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const dest = isFull
     ? (geo.dumpLat != null && geo.dumpLng != null ? { lat: geo.dumpLat, lng: geo.dumpLng } : null)
     : (geo.excLat != null && geo.excLng != null ? { lat: geo.excLat, lng: geo.excLng } : null)
+  // FIXED assigned loading area (the named loading-location's OWN coordinates),
+  // shown as a labelled flag alongside the live shovel on the empty leg. The
+  // shovel (`dest`) is the real, moving load point; this is where the plan said
+  // to load. Only on the empty leg, and only when the location has coordinates.
+  const loadingDest = (!isFull && geo.loadLat != null && geo.loadLng != null)
+    ? { lat: geo.loadLat, lng: geo.loadLng } : null
   const geofenceM = isFull ? (geo.dumpZoneM ?? 50) : (geo.loadingZoneM ?? 10)
   // Moving multi-ring geofences (Discovery 100m / Waiting 20m / Loading 10m)
   // around the shovel are LOGIC ONLY — the server classifies the truck's zone
@@ -1210,7 +1247,8 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
                   <Suspense fallback={<div style={{ position: 'absolute', inset: 0, background: D.panel2,
                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                                  color: D.sub, fontSize: '0.82rem', fontWeight: 700 }}>{dt('loading') || 'Loading map…'}</div>}>
-                    <NavMap truck={truckPt} dest={dest} geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
+                    <NavMap truck={truckPt} dest={dest} loadingDest={loadingDest} loadingLabel={loadingLoc}
+                            geofenceM={geofenceM} lane={isFull ? 'full' : 'empty'}
                             destKind={destKind} stateColor={curColor} route={routePts} routeSegments={routeSegments} roads={roads}
                             height="100%" visible={viewMode === 'map'} />
                   </Suspense>
@@ -1383,6 +1421,90 @@ const StateLine = memo(function StateLine({ label, value, color }: { label: stri
 const secBtn: React.CSSProperties = {
   flex: 1, padding: '10px 8px', fontSize: '0.78rem', fontWeight: 700, color: D.sub2,
   background: D.panel2, border: `1px solid ${D.line2}`, borderRadius: 10, cursor: 'pointer',
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  EQUIPMENT OUI PANEL — app-only ancillary gear (grader/dozer/etc.)
+//  No haul cycle: its whole job is to show + change the manual status, with an
+//  always-reachable "Return to Operating". The unit is on the map via the OUI
+//  GPS overlay (locationShare scope is set by the parent on connect).
+// ════════════════════════════════════════════════════════════════════════
+function EquipmentOuiPanel({ employeeId, unitNo, unitType }:
+  { employeeId: string; unitNo: string; unitType?: string; operatorName?: string }) {
+  const dt = useDispatchT()
+  const [manual, setManual] = useState<{ status: string; reason?: string } | null>(null)
+  const [statusOpen, setStatusOpen] = useState(false)
+
+  // Restore the last manual status after a reload (matches the truck OUI).
+  useEffect(() => {
+    let alive = true
+    apiFetch(`/api/dispatch/equipment-status?unit_no=${encodeURIComponent(unitNo)}`)
+      .then((r) => r.json()).then((d) => { if (alive && d.success && d.status) setManual(d.status) })
+      .catch(() => { /* offline / unknown — stays operating */ })
+    return () => { alive = false }
+  }, [unitNo])
+
+  const cur = manual?.status || 'operating'
+  const curMeta = manualMeta(cur)
+  const nonOp = cur !== 'operating'
+  const typeLabel = equipmentTypeLabel(unitType)
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+      {/* Unit identity card */}
+      <div style={{ ...panel, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 13, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '1.5rem', background: 'rgba(245,165,36,0.12)',
+                      border: `1px solid rgba(245,165,36,0.35)` }}>🚜</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ color: D.ink, fontWeight: 900, fontSize: '1.25rem', letterSpacing: '0.03em',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{unitNo}</div>
+          <div style={{ color: D.sub, fontSize: '0.8rem', fontWeight: 700 }}>{typeLabel}</div>
+        </div>
+        <span style={chip(curMeta?.color || '#16A34A')}>{dt('ms_' + cur).toUpperCase()}</span>
+      </div>
+
+      {/* Big current-status panel + the primary action */}
+      <div style={{ ...panel, flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column',
+                    justifyContent: 'center', alignItems: 'center', gap: 16, textAlign: 'center',
+                    borderColor: nonOp ? `${curMeta?.color || D.line2}` : D.line }}>
+        <div style={{ color: D.sub, fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.1em' }}>
+          {dt('current_state').toUpperCase()}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ width: 18, height: 18, borderRadius: '50%', background: curMeta?.color || '#16A34A',
+                         boxShadow: `0 0 14px ${curMeta?.color || '#16A34A'}` }} />
+          <span style={{ color: D.ink, fontWeight: 900, fontSize: '2rem', letterSpacing: '0.02em' }}>
+            {dt('ms_' + cur)}
+          </span>
+        </div>
+        {nonOp && manual?.reason && (
+          <div style={{ color: D.sub2, fontSize: '0.9rem', fontWeight: 700 }}>{manual.reason}</div>
+        )}
+        {nonOp && (
+          <div style={{ color: D.sub, fontSize: '0.82rem', maxWidth: 360 }}>{dt('out_of_cycle')}</div>
+        )}
+
+        {/* Always-visible primary control. When out-of-operating, a direct
+            green Return button; otherwise open the change-status modal. */}
+        {nonOp ? (
+          <button onClick={() => setStatusOpen(true)} style={{ ...bigBtn('#16A34A', false), maxWidth: 420 }}>
+            {dt('return_operating')}
+          </button>
+        ) : (
+          <button onClick={() => setStatusOpen(true)} style={{ ...bigBtn(D.accent, false), maxWidth: 420 }}>
+            {dt('change_status')}
+          </button>
+        )}
+      </div>
+
+      {/* The shared status modal (trigger hidden — the buttons above open it). */}
+      <ManualStatusControl unitNo={unitNo} unitType={unitType || 'other'} employeeId={employeeId} hideTrigger
+                           current={manual} open={statusOpen} onOpenChange={setStatusOpen}
+                           onChange={(status, reason) => setManual({ status, reason })} />
+    </div>
+  )
 }
 
 // ════════════════════════════════════════════════════════════════════════
