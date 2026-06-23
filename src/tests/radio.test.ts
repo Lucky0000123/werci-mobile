@@ -14,8 +14,12 @@ vi.mock('../services/api', () => ({ apiFetch: (...a: any[]) => apiFetchMock(...a
 import {
   RadioController,
   StubVoiceTransport,
+  pickChannelForStatus,
+  EMERGENCY_HOLD_MS,
   type VoiceTransport,
   type RadioConfig,
+  type SpecialChannels,
+  type RadioChannel,
 } from '../services/radio'
 
 function okJson(body: any) {
@@ -233,3 +237,176 @@ describe('VoiceTransport injection', () => {
     expect(c.isReceiving()).toBe(false)
   })
 })
+
+// ── AdvancedRadioPTT engine: smart-switch + zone follow + emergency ──────────
+
+const SPECIAL: SpecialChannels = {
+  emergency: 'site_emergency',
+  dispatch_lead: 'dispatch_lead',
+  maintenance: 'maintenance_workshop',
+}
+const ADV_CHANNELS: RadioChannel[] = [
+  { name: 'site_emergency', display_name: 'SITE EMERGENCY', sort_order: -100 },
+  { name: 'dispatch', display_name: 'Dispatch', sort_order: 5 },
+  { name: 'general', display_name: 'General', sort_order: 10 },
+  { name: 'dispatch_lead', display_name: 'Dispatch Lead', sort_order: 90 },
+  { name: 'maintenance_workshop', display_name: 'Maintenance / Workshop', sort_order: 95 },
+]
+// A config that mirrors the real /api/radio/config for the advanced cab UI.
+const ADV_CONFIG = {
+  success: true, enabled: true, mumble_host: 'h', mumble_port: 64738, ws_url: '',
+  opus_bitrate: 24000, speak_heartbeat_ms: 50,
+  zone_channels: true, zone_poll_ms: 5000, default_channel: 'dispatch',
+  special_channels: SPECIAL,
+  channels: ADV_CHANNELS,
+}
+function wireAdvanced(zoneChannel = 'dispatch') {
+  apiFetchMock.mockImplementation((path: string) => {
+    if (path === '/api/radio/config') return okJson(ADV_CONFIG)
+    if (path === '/api/radio/identity') return okJson({ success: true, username: 'op_E123' })
+    if (path === '/api/radio/ptt') return okJson({ success: true })
+    if (path === '/api/radio/zone') return okJson({ success: true, zone_channels: true, channel: zoneChannel, changed: true })
+    return okJson({ success: true })
+  })
+}
+
+describe('pickChannelForStatus (pure smart-switch)', () => {
+  it('breakdown + maintenance route to the workshop net', () => {
+    expect(pickChannelForStatus('breakdown', SPECIAL, ADV_CHANNELS, 'general')).toBe('maintenance_workshop')
+    expect(pickChannelForStatus('maintenance', SPECIAL, ADV_CHANNELS, 'general')).toBe('maintenance_workshop')
+  })
+  it('delay routes to the dispatch lead', () => {
+    expect(pickChannelForStatus('delay', SPECIAL, ADV_CHANNELS, 'general')).toBe('dispatch_lead')
+  })
+  it('operating / standby / unknown keep the normal channel', () => {
+    expect(pickChannelForStatus('operating', SPECIAL, ADV_CHANNELS, 'general')).toBe('general')
+    expect(pickChannelForStatus('standby', SPECIAL, ADV_CHANNELS, 'general')).toBe('general')
+    expect(pickChannelForStatus(null, SPECIAL, ADV_CHANNELS, 'general')).toBe('general')
+  })
+  it('falls back to the normal channel when the special group is not published', () => {
+    const noSpecials = [{ name: 'general', display_name: 'General' }]
+    expect(pickChannelForStatus('breakdown', SPECIAL, noSpecials, 'general')).toBe('general')
+  })
+})
+
+describe('RadioController smart-switch + zone follow', () => {
+  beforeEach(() => { apiFetchMock.mockReset() })
+
+  it('applyStatus(breakdown) switches to the maintenance net, operating restores normal', async () => {
+    wireAdvanced('dispatch')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    expect(c.getChannel()).toBe('dispatch')   // default_channel
+    await c.applyStatus('breakdown')
+    expect(c.getChannel()).toBe('maintenance_workshop')
+    await c.applyStatus('delay')
+    expect(c.getChannel()).toBe('dispatch_lead')
+    await c.applyStatus('operating')
+    expect(c.getChannel()).toBe('dispatch')   // back to the normal channel
+  })
+
+  it('resolveZoneChannel follows the GPS-resolved talk group', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    await c.resolveZoneChannel({ lat: 1, lng: 2 })
+    expect(c.getChannel()).toBe('general')
+  })
+
+  it('a manual status overrides the zone channel until it clears', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    await c.applyStatus('breakdown')
+    expect(c.getChannel()).toBe('maintenance_workshop')
+    // A zone resolve arrives while broken down -> remembered, but not applied.
+    await c.resolveZoneChannel({ lat: 1, lng: 2 })
+    expect(c.getChannel()).toBe('maintenance_workshop')
+    // Clearing the status snaps to the remembered zone channel.
+    await c.applyStatus('operating')
+    expect(c.getChannel()).toBe('general')
+  })
+
+  it('does not poll zones when zone-following is off', async () => {
+    apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/radio/config') return okJson({ ...ADV_CONFIG, zone_channels: false })
+      if (path === '/api/radio/identity') return okJson({ success: true, username: 'op_E123' })
+      return okJson({ success: true })
+    })
+    const c = new RadioController()
+    await c.connect(IDENT)
+    expect(c.isZoneFollowing()).toBe(false)
+    await c.resolveZoneChannel({ lat: 1, lng: 2 })
+    expect(apiFetchMock.mock.calls.some((cc) => cc[0] === '/api/radio/zone')).toBe(false)
+  })
+})
+
+describe('RadioController emergency (panic) mode', () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('forces the emergency channel, opens the mic, flags reports, and pulses', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    const seen: boolean[] = []
+    c.onEmergency((e) => seen.push(e))
+    await c.connect(IDENT)
+    apiFetchMock.mockClear()
+
+    await c.startEmergency()
+    expect(c.isEmergency()).toBe(true)
+    expect(c.getChannel()).toBe('site_emergency')
+    expect(c.getState()).toBe('transmitting')
+    expect(seen).toContain(true)            // listener saw the pulse turn on
+
+    // The PTT report carries emergency:true on the emergency channel.
+    const down = apiFetchMock.mock.calls.find(
+      (cc) => cc[0] === '/api/radio/ptt' &&
+        JSON.parse((cc[1] as RequestInit).body as string).state === 'down')
+    const payload = JSON.parse((down![1] as RequestInit).body as string)
+    expect(payload.emergency).toBe(true)
+    expect(payload.channel).toBe('site_emergency')
+  })
+
+  it('auto-releases the mic after the hands-free window but stays in emergency', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    await c.startEmergency()
+    expect(c.getState()).toBe('transmitting')
+    await vi.advanceTimersByTimeAsync(EMERGENCY_HOLD_MS + 10)
+    expect(c.getState()).toBe('idle')       // mic released
+    expect(c.isEmergency()).toBe(true)      // but still in emergency mode
+  })
+
+  it('stopEmergency releases the mic, drops the pulse, and restores the channel', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    await c.applyStatus('delay')            // would be on dispatch_lead normally
+    await c.startEmergency()
+    expect(c.getChannel()).toBe('site_emergency')
+    await c.stopEmergency()
+    expect(c.isEmergency()).toBe(false)
+    expect(c.getState()).toBe('idle')
+    expect(c.getChannel()).toBe('dispatch_lead')   // restored to the status channel
+  })
+
+  it('applyStatus is ignored while emergency owns the channel', async () => {
+    wireAdvanced('general')
+    const c = new RadioController()
+    await c.connect(IDENT)
+    await c.startEmergency()
+    await c.applyStatus('breakdown')        // must NOT move off the emergency channel
+    expect(c.getChannel()).toBe('site_emergency')
+    await c.stopEmergency()
+    expect(c.getChannel()).toBe('maintenance_workshop')  // the deferred status now applies
+  })
+})
+

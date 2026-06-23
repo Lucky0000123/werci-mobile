@@ -1,4 +1,4 @@
-// In-cab dispatch screen. Flow (no fleet-type question — type is auto-detected):
+﻿// In-cab dispatch screen. Flow (no fleet-type question — type is auto-detected):
 //   1. enter Employee ID  → 2. employee card + Kimper authorization
 //   3. type the unit number → dropdown of matching SUPPORTED units (excavator /
 //      dump truck) from /api/dispatch/units → 4. tap one → the app detects the
@@ -26,11 +26,13 @@ import { useI18n, type Language } from '../services/i18n-context'
 // Lazy-load it so the FMS sign-on, the employee card, and the excavator OUI (no
 // map at all) never pay the map-engine parse cost on a low-end cab tablet.
 const NavMap = lazy(() => import('../components/NavMap'))
-// Radio (PRISM Radio / Mumble PTT) overlay. Lazy-loaded so the dispatch screen
-// pulls in NO radio / audio code at module load -- a voice failure can never
-// affect the haul-cycle, and low-end cab tablets pay nothing until the operator
-// opens the radio. See docs/prism_radio_phase1.md.
-const RadioOverlay = lazy(() => import('../components/RadioOverlay'))
+// AdvancedRadioPTT is the in-cab radio surface: a floating 96px PTT button
+// (tap = channel sheet, hold = push-to-talk, long-press = emergency) with smart
+// channel auto-switch. Lazy-loaded so the dispatch screen pulls in NO radio /
+// audio code at module load so a voice failure can never affect the haul-cycle,
+// and low-end cab tablets pay nothing for it until connected. See
+// docs/prism_radio_phase1.md.
+const AdvancedRadioPTT = lazy(() => import('../components/AdvancedRadioPTT'))
 import { TruckStatusPanel } from '../components/TruckStatusPanel'
 import ExcavatorOuiPanel from '../components/ExcavatorOuiPanel'
 import type { Assignment, StatusState } from '../components/TruckStatusPanel'
@@ -310,10 +312,6 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   const dt = useDispatchT()
   const { language, setLanguage } = useI18n()
   const [showLangMenu, setShowLangMenu] = useState(false)
-  // Radio (PRISM Radio / Mumble PTT) overlay open state. An in-page overlay (the
-  // cab is locked to /dispatch), reachable from the shared operator top bar so it
-  // works on both the truck and excavator windows.
-  const [radioOpen, setRadioOpen] = useState(false)
   const [employeeId, setEmployeeId] = useState('')
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileOffline, setProfileOffline] = useState(false)
@@ -646,17 +644,6 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     }
   }
 
-  function reset() {
-    setEmployeeId(''); setProfile(null); setUnitNo(''); setSelectedType(null)
-    setSuggestions([]); setShowDrop(false); setError(null); setResult(null); setConnectedUnit('')
-    setIdPreview(null); setIdPreviewError(null); setIdPreviewOffline(false)
-    setUnitPreview(null); setConnecting(false)
-    void import('../services/locationShare')
-      .then((m) => m.setConnectedScope(null))
-      .catch(() => { /* noop */ })
-    setTimeout(() => idInputRef.current?.focus(), 80)
-  }
-
   // Back from Step 2 → Step 1 (keep nothing from the unit step).
   function backToOperator() {
     setProfile(null); setProfileOffline(false)
@@ -727,17 +714,8 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
               <WarnIcons warnings={connection.warnings} />
             )}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              {/* Radio (PRISM Radio / Mumble PTT) entry — glove-friendly, on the
-                  shared top bar so it is reachable from BOTH the truck and
-                  excavator operator windows, physically separate from the
-                  haul-cycle action buttons so it never blocks them. */}
-              <button type="button" onClick={() => setRadioOpen(true)} aria-label={dt('radio_title')}
-                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px',
-                               fontSize: '0.74rem', fontWeight: 800, color: D.sub2,
-                               background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
-                <span style={{ fontSize: '0.95rem', lineHeight: 1 }} aria-hidden>📻</span>
-                <span>{dt('radio')}</span>
-              </button>
+              {/* The radio lives in the floating AdvancedRadioPTT button
+                  (bottom thumb-zone), not the top bar -- see below. */}
               {/* Language switcher — must be reachable from EVERY in-cab screen
                   (excavator + truck OUI both render under this top bar). */}
               <div style={{ position: 'relative' }}>
@@ -775,10 +753,6 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
                   </>
                 )}
               </div>
-              <button onClick={reset}
-                      style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: D.sub2, background: 'transparent', border: `1px solid ${D.line2}`, borderRadius: 9, cursor: 'pointer' }}>
-                {dt('different_emp')}
-              </button>
               <button onClick={() => disconnect(profile.employee_id)} disabled={loading}
                       style={{ padding: '7px 11px', fontSize: '0.74rem', fontWeight: 700, color: '#fff', background: '#7F1D1D', border: '1px solid #B91C1C', borderRadius: 9, cursor: 'pointer' }}>
                 {dt('end_shift')}
@@ -799,18 +773,17 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
           )}
         </div>
 
-        {/* Radio overlay — lazy, in-page (cab is locked to /dispatch). Rendered
-            at the operator-window level so it works for truck AND excavator. The
-            <Suspense> fallback is null so opening it never blocks the cab; a
-            voice failure shows "Radio offline" inside the overlay. */}
-        {radioOpen && (
-          <Suspense fallback={null}>
-            <RadioOverlay
-              identity={{ employeeId: profile.employee_id, unitNo: connection.unit_no, operatorName: profile.name }}
-              onClose={() => setRadioOpen(false)}
-            />
-          </Suspense>
-        )}
+        {/* AdvancedRadioPTT -- the cab's entire radio surface: a floating 96px
+            PTT button (tap = channel sheet, hold = push-to-talk, 3s long-press =
+            emergency) with smart channel auto-switch. Always mounted on the
+            connected operator window (truck AND excavator); lazy + Suspense
+            fallback null so it never blocks the cab, and a voice/zone failure
+            degrades to "Radio offline" without ever touching the haul-cycle. */}
+        <Suspense fallback={null}>
+          <AdvancedRadioPTT
+            identity={{ employeeId: profile.employee_id, unitNo: connection.unit_no, operatorName: profile.name }}
+          />
+        </Suspense>
       </div>
     )
   }

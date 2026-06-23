@@ -39,12 +39,72 @@ export interface RadioConfig {
   opus_bitrate: number
   speak_heartbeat_ms: number
   channels: RadioChannel[]
+  // Phase 2: server tells the cab whether to follow zones from its GPS.
+  zone_channels: boolean
+  zone_poll_ms: number
+  default_channel: string
+  // The talk groups the AdvancedRadioPTT smart-switch / panic button switch to.
+  // Advisory: a name missing from `channels` is ignored (the cab keeps its
+  // current channel) so a mis-config can never strand the operator.
+  special_channels: SpecialChannels
 }
+
+// Names of the special talk groups the cab switches to on a manual-status change
+// or a panic. Resolved server-side (env-overridable) and sent in /config.
+export interface SpecialChannels {
+  emergency: string       // SITE_EMERGENCY (panic / long-press)
+  dispatch_lead: string   // DELAY status -> escalate to the dispatch lead
+  maintenance: string     // BREAKDOWN / MAINTENANCE -> the workshop net
+}
+
+const DEFAULT_SPECIAL: SpecialChannels = {
+  emergency: 'site_emergency',
+  dispatch_lead: 'dispatch_lead',
+  maintenance: 'maintenance_workshop',
+}
+
+// The cab's manual machine status (mirrors DispatchPage MANUAL_STATUSES). Drives
+// the smart channel auto-switch: BREAKDOWN/MAINTENANCE -> maintenance net,
+// DELAY -> dispatch lead, everything else -> the unit's normal/zone channel.
+export type ManualRadioStatus =
+  | 'operating' | 'delay' | 'standby' | 'breakdown' | 'maintenance'
+
+// How long the mic stays open hands-free after a panic long-press (ms).
+export const EMERGENCY_HOLD_MS = 10000
 
 export interface RadioIdentity {
   employeeId?: string | null
   unitNo?: string | null
   operatorName?: string | null
+}
+
+// ---------------------------------------------------------------------------
+// pickChannelForStatus -- the PURE smart-switch decision (easy to unit test).
+//
+// Given the operator's manual machine status, the special-channel names, the
+// list of talk groups that actually exist, and the channel the unit would
+// otherwise be on (its GPS/zone channel), return the talk group the cab should
+// switch to:
+//   breakdown / maintenance -> maintenance net (workshop)
+//   delay                    -> dispatch lead (escalation)
+//   operating / standby / *  -> the normal/zone channel
+// A special channel that the server did not actually publish is ignored (we keep
+// `normalChannel`) so a mis-config never strands the operator on a dead group.
+// ---------------------------------------------------------------------------
+export function pickChannelForStatus(
+  status: ManualRadioStatus | string | null | undefined,
+  special: SpecialChannels,
+  available: RadioChannel[],
+  normalChannel: string | null,
+): string | null {
+  const has = (name: string | null | undefined): name is string =>
+    !!name && available.some((c) => c.name === name)
+  const want =
+    status === 'breakdown' || status === 'maintenance' ? special.maintenance
+    : status === 'delay' ? special.dispatch_lead
+    : null                                  // operating / standby / unknown
+  if (want && has(want)) return want
+  return normalChannel
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +150,12 @@ export class StubVoiceTransport implements VoiceTransport {
 }
 
 type StateListener = (s: RadioState) => void
+type EmergencyListener = (emergency: boolean) => void
+
+// What the cab knows about where it should be (for the smart-switch). The unit's
+// "normal" channel is its GPS/zone channel when zone-following is on, else the
+// configured default. The status overrides it (delay/breakdown) until cleared.
+type GeoFix = { lat?: number | null; lng?: number | null }
 
 // ---------------------------------------------------------------------------
 // RadioController -- the state machine + HTTP reporter the UI binds to.
@@ -97,12 +163,23 @@ type StateListener = (s: RadioState) => void
 export class RadioController {
   private state: RadioState = 'offline'
   private listeners = new Set<StateListener>()
+  private emergencyListeners = new Set<EmergencyListener>()
   private transport: VoiceTransport
   private cfg: RadioConfig | null = null
   private identity: RadioIdentity = {}
   private channel: string | null = null
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private receiving = false
+  // Smart-switch state. `normalChannel` is the unit's GPS/zone channel (or the
+  // configured default); `status` is the last applied manual machine status; the
+  // active `channel` is derived from these by pickChannelForStatus(). Emergency
+  // forces the channel to special.emergency and rides over everything until
+  // stopEmergency() restores the status-derived channel.
+  private special: SpecialChannels = DEFAULT_SPECIAL
+  private normalChannel: string | null = null
+  private status: ManualRadioStatus | null = null
+  private emergency = false
+  private emergencyTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(transport?: VoiceTransport) {
     this.transport = transport || new StubVoiceTransport()
@@ -118,11 +195,20 @@ export class RadioController {
   isReceiving(): boolean { return this.receiving }
   getChannel(): string | null { return this.channel }
   getChannels(): RadioChannel[] { return this.cfg?.channels || [] }
+  getSpecial(): SpecialChannels { return this.special }
+  isEmergency(): boolean { return this.emergency }
+  isZoneFollowing(): boolean { return !!this.cfg?.zone_channels }
 
   onState(cb: StateListener): () => void {
     this.listeners.add(cb)
     cb(this.state)
     return () => this.listeners.delete(cb)
+  }
+  // Emergency lets the UI pulse the screen RED independently of the talk state.
+  onEmergency(cb: EmergencyListener): () => void {
+    this.emergencyListeners.add(cb)
+    cb(this.emergency)
+    return () => this.emergencyListeners.delete(cb)
   }
   private set(s: RadioState): void {
     if (s === this.state) return
@@ -132,6 +218,11 @@ export class RadioController {
   private emit(): void {
     for (const cb of this.listeners) {
       try { cb(this.state) } catch { /* listener errors never break the radio */ }
+    }
+  }
+  private emitEmergency(): void {
+    for (const cb of this.emergencyListeners) {
+      try { cb(this.emergency) } catch { /* listener errors never break the radio */ }
     }
   }
 
@@ -145,8 +236,25 @@ export class RadioController {
       this.cfg = cfg
       const ident = await this.mintIdentity()
       if (!ident) { this.set('offline'); return }
-      // Default to the first talk group (dispatch usually sorts first).
-      if (!this.channel && cfg.channels.length) this.channel = cfg.channels[0].name
+      // Special-channel names + the unit's starting "normal" channel. With zone
+      // following on we begin on the default and let the first /zone resolve move
+      // us; otherwise the default channel IS the normal channel.
+      this.special = cfg.special_channels || DEFAULT_SPECIAL
+      if (!this.normalChannel) {
+        // The configured default only counts if it actually exists as a talk
+        // group; otherwise fall back to the first channel so a mis-configured
+        // default can never strand the cab on a non-existent group.
+        const def = cfg.default_channel
+        this.normalChannel = (def && cfg.channels.some((c) => c.name === def))
+          ? def
+          : (cfg.channels.length ? cfg.channels[0].name : null)
+      }
+      // Default to the status-derived channel (normal unless a status was already
+      // applied before connect). Falls back to the first talk group.
+      if (!this.channel) {
+        this.channel = pickChannelForStatus(this.status, this.special, cfg.channels, this.normalChannel)
+          || (cfg.channels.length ? cfg.channels[0].name : null)
+      }
       // Best-effort audio connect; failure just means client-reported mode.
       try { await this.transport.connect(cfg, ident.username) } catch { /* audio optional */ }
       if (this.channel) { try { await this.transport.selectChannel(this.channel) } catch { /* ignore */ } }
@@ -180,8 +288,96 @@ export class RadioController {
 
   async disconnect(): Promise<void> {
     this.stopHeartbeat()
+    this.clearEmergencyTimer()
     try { await this.transport.disconnect() } catch { /* ignore */ }
     this.set('offline')
+  }
+
+  // -- smart channel auto-switch -----------------------------------------
+  // The cab applies a manual machine status and the radio follows it: BREAKDOWN/
+  // MAINTENANCE -> the workshop net, DELAY -> the dispatch lead, anything else ->
+  // the unit's normal/zone channel. A no-op while emergency mode is active (panic
+  // overrides everything). Best-effort: never throws into the caller.
+  async applyStatus(status: ManualRadioStatus | string | null | undefined): Promise<void> {
+    this.status = (status as ManualRadioStatus) || null
+    if (this.emergency) return            // panic owns the channel
+    if (this.state === 'offline' || this.state === 'connecting') return
+    const want = pickChannelForStatus(this.status, this.special, this.getChannels(), this.normalChannel)
+    if (want && want !== this.channel) await this.selectChannel(want)
+  }
+
+  // Resolve which zone talk group this unit belongs on from its live GPS and, if
+  // it changed, follow it -- UNLESS a manual status (delay/breakdown) or an
+  // emergency currently overrides the channel, in which case we just remember the
+  // new normal channel so we snap to it when the status clears. Mirrors the
+  // server's /api/radio/zone contract; best-effort, never throws.
+  async resolveZoneChannel(fix?: GeoFix): Promise<void> {
+    if (!this.cfg?.zone_channels) return
+    if (this.state === 'offline' || this.state === 'connecting') return
+    try {
+      const res = await apiFetch('/api/radio/zone', {
+        method: 'POST',
+        body: JSON.stringify({
+          unit_no: this.identity.unitNo || '',
+          employee_id: this.identity.employeeId || '',
+          lat: fix?.lat ?? null,
+          lng: fix?.lng ?? null,
+        }),
+      })
+      if (!res.ok) return
+      const body = await res.json()
+      const ch = body?.channel
+      if (!ch || typeof ch !== 'string') return
+      this.normalChannel = ch
+      // Only actually move if nothing is overriding the normal channel.
+      if (this.emergency) return
+      const want = pickChannelForStatus(this.status, this.special, this.getChannels(), this.normalChannel)
+      if (want && want !== this.channel) await this.selectChannel(want)
+    } catch { /* zone resolve is best-effort */ }
+  }
+
+  // -- EMERGENCY (panic) --------------------------------------------------
+  // Force the SITE_EMERGENCY channel, open the mic hands-free for EMERGENCY_HOLD_MS
+  // (the operator's hands stay on the wheel), and flag every PTT report so the
+  // dispatcher map pulses this truck RED. Auto-releases the mic when the window
+  // ends but STAYS in emergency mode until stopEmergency() (so the red screen
+  // pulse and the channel lock persist). Best-effort throughout.
+  async startEmergency(): Promise<void> {
+    if (this.state === 'offline' || this.state === 'connecting') return
+    this.emergency = true
+    this.emitEmergency()
+    // Switch to the emergency talk group if it exists; otherwise stay put but keep
+    // the emergency flag (the dispatcher still sees the panic via /speaking).
+    const em = this.special.emergency
+    if (em && this.getChannels().some((c) => c.name === em) && em !== this.channel) {
+      await this.selectChannel(em)
+    } else {
+      this.emit()                          // reflect the forced state in the UI
+    }
+    // Open the mic hands-free, then auto-release after the window.
+    await this.pttDown()
+    this.clearEmergencyTimer()
+    this.emergencyTimer = setTimeout(() => {
+      this.emergencyTimer = null
+      // Release the mic but remain in emergency mode (screen keeps pulsing).
+      void this.pttUp()
+    }, EMERGENCY_HOLD_MS)
+  }
+
+  // End panic mode: release the mic, drop the RED pulse, and snap back to the
+  // channel the unit should be on for its current status/zone.
+  async stopEmergency(): Promise<void> {
+    this.clearEmergencyTimer()
+    const wasEmergency = this.emergency
+    this.emergency = false
+    if (this.state === 'transmitting') await this.pttUp()
+    if (wasEmergency) this.emitEmergency()
+    const want = pickChannelForStatus(this.status, this.special, this.getChannels(), this.normalChannel)
+    if (want && want !== this.channel) await this.selectChannel(want)
+  }
+
+  private clearEmergencyTimer(): void {
+    if (this.emergencyTimer) { clearTimeout(this.emergencyTimer); this.emergencyTimer = null }
   }
 
   // -- HTTP (all best-effort; never throw into the UI) --------------------
@@ -199,6 +395,14 @@ export class RadioController {
         opus_bitrate: body.opus_bitrate || 24000,
         speak_heartbeat_ms: body.speak_heartbeat_ms || 3000,
         channels: Array.isArray(body.channels) ? body.channels : [],
+        zone_channels: body.zone_channels === true,
+        zone_poll_ms: body.zone_poll_ms || 0,
+        default_channel: body.default_channel || 'general',
+        special_channels: {
+          emergency: body.special_channels?.emergency || DEFAULT_SPECIAL.emergency,
+          dispatch_lead: body.special_channels?.dispatch_lead || DEFAULT_SPECIAL.dispatch_lead,
+          maintenance: body.special_channels?.maintenance || DEFAULT_SPECIAL.maintenance,
+        },
       }
     } catch {
       return null
@@ -225,6 +429,8 @@ export class RadioController {
 
   private reportPtt(state: 'down' | 'up' | 'heartbeat'): void {
     // Fire-and-forget: the cab must never wait on this and a failure is silent.
+    // `emergency` rides every report while panic mode is active so the dispatcher
+    // map keeps the truck pulsing RED for the whole transmission.
     void apiFetch('/api/radio/ptt', {
       method: 'POST',
       body: JSON.stringify({
@@ -233,6 +439,7 @@ export class RadioController {
         unit_no: this.identity.unitNo || '',
         employee_id: this.identity.employeeId || '',
         operator_name: this.identity.operatorName || '',
+        emergency: this.emergency,
       }),
     }).catch(() => { /* swallow */ })
   }

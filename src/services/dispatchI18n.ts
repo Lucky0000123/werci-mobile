@@ -1,4 +1,4 @@
-// Contained translations for the Dispatch / FMS pages (ModePicker + DispatchPage
+﻿// Contained translations for the Dispatch / FMS pages (ModePicker + DispatchPage
 // + operator windows). Kept separate from the strict 1800-line src/services/i18n.ts
 // (whose Record<Language, Dict> type forces full key parity across en/id/zh).
 // Here zh/es fall back to English automatically via dtFor(). Add a language by
@@ -185,6 +185,10 @@ const EN: Dict = {
   radio_no_channel: 'No talk groups available yet.',
   radio_close: 'Close',
   radio_retry: 'Retry',
+  radio_emergency_active: 'EMERGENCY ACTIVE',
+  radio_emergency_end: 'End emergency',
+  radio_emergency_hint: 'All-site alert',
+  radio_tap_hint: 'Tap a talk group, or hold the button to talk.',
 }
 
 const ID: Dict = {
@@ -355,6 +359,10 @@ const ID: Dict = {
   radio_no_channel: 'Belum ada grup bicara.',
   radio_close: 'Tutup',
   radio_retry: 'Coba lagi',
+  radio_emergency_active: 'DARURAT AKTIF',
+  radio_emergency_end: 'Akhiri darurat',
+  radio_emergency_hint: 'Peringatan seluruh lokasi',
+  radio_tap_hint: 'Ketuk grup bicara, atau tahan tombol untuk bicara.',
 }
 
 const ZH: Dict = {
@@ -525,6 +533,10 @@ const ZH: Dict = {
   radio_no_channel: '暂无通话组。',
   radio_close: '关闭',
   radio_retry: '重试',
+  radio_emergency_active: '紧急状态',
+  radio_emergency_end: '结束紧急',
+  radio_emergency_hint: '全场警报',
+  radio_tap_hint: '点按通话组，或按住按钮通话。',
 }
 
 const DICTS: Record<Language, Dict> = { en: EN, id: ID, zh: ZH, es: {} }
