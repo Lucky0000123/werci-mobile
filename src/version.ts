@@ -7,6 +7,22 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.51.0 — In-cab PRISM Radio button (AdvancedRadioPTT). The dispatch
+ *          operator window now has a floating round push-to-talk button in the
+ *          bottom thumb-zone (replaces the old top-bar radio entry). TAP it to
+ *          pick a talk group (bottom sheet, glove-size rows, the site EMERGENCY
+ *          channel pinned at the top in red); HOLD it to talk (green glow,
+ *          also driven by a Bluetooth / wired headset PTT key); LONG-PRESS 3s to
+ *          raise a hands-free SITE EMERGENCY (full-screen red pulse + SOS banner
+ *          + an explicit "End emergency"). The button smart-switches talk group
+ *          by the truck's manual status (breakdown/maintenance → maintenance net,
+ *          delay → dispatch-lead net) and follows zone channels by GPS. The radio
+ *          is fully DECOUPLED from the haul cycle — it only reads status, is lazy-
+ *          loaded, and any voice/zone failure degrades to "Radio offline" without
+ *          ever touching dispatch. Also removes the now-unused "Change Employee"
+ *          button. EN/ID/ZH strings added. (Pairs with the server radio engine:
+ *          emergency flag on /ptt + /speaking, fixed SPECIAL channels, and
+ *          special_channels advertised by /api/radio/config.)
  * 2.50.0 — Excavator tablet fixes for the production haul-cycle simulator. The
  *          excavator OUI is loading-control only: (1) tapping FULL no longer shows
  *          a "DT-SIM-X Full Travel" message (or any truck travel-state text); the
@@ -433,4 +449,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.50.0'
+export const APP_VERSION = '2.51.0'
