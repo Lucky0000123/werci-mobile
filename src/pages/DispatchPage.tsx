@@ -33,6 +33,12 @@ const NavMap = lazy(() => import('../components/NavMap'))
 // and low-end cab tablets pay nothing for it until connected. See
 // docs/prism_radio_phase1.md.
 const AdvancedRadioPTT = lazy(() => import('../components/AdvancedRadioPTT'))
+// CabCallPanel is the in-cab PRISM Cab Call surface: a floating call button (left
+// thumb-zone), the blue incoming-call ring, and the amber dispatcher-broadcast
+// banner. Lazy-loaded for the same reason as the radio (no cab-call/SSE code at
+// module load; a cab-call outage degrades to "Cab Call offline" and never touches
+// the haul-cycle). See docs/prism_cab_call.md.
+const CabCallPanel = lazy(() => import('../components/CabCallPanel'))
 import { TruckStatusPanel } from '../components/TruckStatusPanel'
 import ExcavatorOuiPanel from '../components/ExcavatorOuiPanel'
 import type { Assignment, StatusState } from '../components/TruckStatusPanel'
@@ -781,6 +787,18 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
             degrades to "Radio offline" without ever touching the haul-cycle. */}
         <Suspense fallback={null}>
           <AdvancedRadioPTT
+            identity={{ employeeId: profile.employee_id, unitNo: connection.unit_no, operatorName: profile.name }}
+          />
+        </Suspense>
+
+        {/* CabCallPanel -- the cab's PRISM Cab Call surface: a floating call button
+            (left thumb-zone, opposite the radio PTT), the blue 1:1 incoming-call
+            ring, and the amber dispatcher-broadcast banner. Same identity as the
+            radio; lazy + Suspense fallback null so it never blocks the cab, and a
+            cab-call outage degrades to "Cab Call offline" without ever touching
+            the haul-cycle. */}
+        <Suspense fallback={null}>
+          <CabCallPanel
             identity={{ employeeId: profile.employee_id, unitNo: connection.unit_no, operatorName: profile.name }}
           />
         </Suspense>

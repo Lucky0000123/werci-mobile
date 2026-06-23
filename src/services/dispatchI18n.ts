@@ -189,6 +189,25 @@ const EN: Dict = {
   radio_emergency_end: 'End emergency',
   radio_emergency_hint: 'All-site alert',
   radio_tap_hint: 'Tap a talk group, or hold the button to talk.',
+  // ── cab call (PRISM Cab Call / intercom phone) ──
+  cabcall: 'Cab Call',
+  cabcall_call_dispatch: 'Call Dispatch',
+  cabcall_calling: 'Calling dispatch\u2026',
+  cabcall_ringing: 'Incoming call',
+  cabcall_from_dispatch: 'Dispatch is calling',
+  cabcall_connected: 'On call with dispatch',
+  cabcall_answer: 'Answer',
+  cabcall_decline: 'Decline',
+  cabcall_end: 'End call',
+  cabcall_offline: 'Cab Call offline',
+  cabcall_offline_hint: 'Intercom unavailable. Use the radio.',
+  cabcall_breakdown: 'Report breakdown',
+  cabcall_fuel: 'Request fuel',
+  cabcall_no_assignment: 'No assignment',
+  cabcall_broadcast: 'Dispatch broadcast',
+  cabcall_broadcast_urgent: 'URGENT broadcast',
+  cabcall_dismiss: 'Dismiss',
+  cabcall_alert_sent: 'Alert sent to dispatch',
 }
 
 const ID: Dict = {
@@ -363,6 +382,25 @@ const ID: Dict = {
   radio_emergency_end: 'Akhiri darurat',
   radio_emergency_hint: 'Peringatan seluruh lokasi',
   radio_tap_hint: 'Ketuk grup bicara, atau tahan tombol untuk bicara.',
+  // ── cab call ──
+  cabcall: 'Panggilan Kabin',
+  cabcall_call_dispatch: 'Hubungi Dispatch',
+  cabcall_calling: 'Menghubungi dispatch\u2026',
+  cabcall_ringing: 'Panggilan masuk',
+  cabcall_from_dispatch: 'Dispatch menelepon',
+  cabcall_connected: 'Tersambung dengan dispatch',
+  cabcall_answer: 'Jawab',
+  cabcall_decline: 'Tolak',
+  cabcall_end: 'Akhiri',
+  cabcall_offline: 'Panggilan Kabin offline',
+  cabcall_offline_hint: 'Interkom tidak tersedia. Gunakan radio.',
+  cabcall_breakdown: 'Lapor kerusakan',
+  cabcall_fuel: 'Minta bahan bakar',
+  cabcall_no_assignment: 'Tanpa tugas',
+  cabcall_broadcast: 'Siaran dispatch',
+  cabcall_broadcast_urgent: 'Siaran PENTING',
+  cabcall_dismiss: 'Tutup',
+  cabcall_alert_sent: 'Peringatan terkirim ke dispatch',
 }
 
 const ZH: Dict = {
@@ -537,6 +575,25 @@ const ZH: Dict = {
   radio_emergency_end: '结束紧急',
   radio_emergency_hint: '全场警报',
   radio_tap_hint: '点按通话组，或按住按钮通话。',
+  // ── cab call ──
+  cabcall: '驾驶室通话',
+  cabcall_call_dispatch: '呼叫调度',
+  cabcall_calling: '正在呼叫调度\u2026',
+  cabcall_ringing: '来电',
+  cabcall_from_dispatch: '调度来电',
+  cabcall_connected: '正在与调度通话',
+  cabcall_answer: '接听',
+  cabcall_decline: '拒绝',
+  cabcall_end: '挂断',
+  cabcall_offline: '驾驶室通话离线',
+  cabcall_offline_hint: '对讲不可用，请使用对讲机。',
+  cabcall_breakdown: '报告故障',
+  cabcall_fuel: '请求加油',
+  cabcall_no_assignment: '无任务',
+  cabcall_broadcast: '调度广播',
+  cabcall_broadcast_urgent: '紧急广播',
+  cabcall_dismiss: '关闭',
+  cabcall_alert_sent: '警报已发送至调度',
 }
 
 const DICTS: Record<Language, Dict> = { en: EN, id: ID, zh: ZH, es: {} }
