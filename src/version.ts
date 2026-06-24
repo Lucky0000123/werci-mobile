@@ -7,6 +7,23 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.53.0 — Digital Cab Call (in-cab). The old in-cab radio button is replaced
+ *          by ONE smart floating CALL button (bottom-right, 96px, glove-size):
+ *          a SINGLE TAP opens a role picker (Dispatcher / Maintenance / Safety,
+ *          colour-coded, ≥72px rows) and rings that desk; a HOLD ≥2s still arms
+ *          the hands-free SITE EMERGENCY on the EXISTING radio path (conic
+ *          arming ring → full-screen red pulse + End). A connected call shows a
+ *          TAP-TO-TALK toggle (calls open MUTED; tap "Talk" to open the mic,
+ *          which also reports PTT so the other side sees "speaking"). When the
+ *          desk is unmanned the call 409s into an amber "use radio" notice
+ *          instead of ringing forever. Voice rides Option A — a real
+ *          MumbleWebTransport (mumble-web-proxy WS ↔ Murmur + Opus) shared by
+ *          web and mobile, wired via MUMBLE_WS_URL; with no proxy/bundle it
+ *          degrades cleanly to "voice offline" (signalling-only, never throws),
+ *          so dispatch is never blocked by audio. The legacy AdvancedRadioPTT
+ *          component is removed (its PTT/emergency engine lives in radio.ts).
+ *          EN/ID/ZH strings added. (Pairs with the web Radio-page cab-call
+ *          console + the cab-call slot/voice-handoff backend.)
  * 2.51.0 — In-cab PRISM Radio button (AdvancedRadioPTT). The dispatch
  *          operator window now has a floating round push-to-talk button in the
  *          bottom thumb-zone (replaces the old top-bar radio entry). TAP it to
@@ -449,4 +466,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.51.0'
+export const APP_VERSION = '2.53.0'
