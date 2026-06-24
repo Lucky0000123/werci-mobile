@@ -7,6 +7,17 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.56.0 — Cab Call removed from the in-cab app. The Digital Cab Call feature
+ *          (the single floating CALL button + its role picker, the incoming-call
+ *          ring, and the dispatcher-broadcast banner) is withdrawn for now while
+ *          the voice backend is parked. This also removes the hold-2s SITE
+ *          EMERGENCY panic that was hosted on that same button, plus the unused
+ *          radio PTT engine (services/radio.ts) and the standalone RadioOverlay.
+ *          The dispatch haul-cycle, the OUIs, and the dispatcher-pushed
+ *          restricted-zone / keep-out siren (emergencyAlert.ts, an independent
+ *          safety path) are untouched. Dropped the now-orphaned radio_ / cabcall_
+ *          EN/ID/ZH strings and the cab-call/radio unit tests. (Pairs with the
+ *          web change moving the Radio console back under Administration.)
  * 2.55.1 — FMS sign-on: stop rejecting a long Employee ID while it's still
  *          being typed. Employee IDs are ~10-digit numbers, so the debounced
  *          /lookup no longer runs (and the preview no longer flashes "ID not
@@ -490,4 +501,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.55.1'
+export const APP_VERSION = '2.56.0'
