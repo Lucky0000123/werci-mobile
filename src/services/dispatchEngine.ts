@@ -206,6 +206,66 @@ export interface CycleGeo {
 
 export interface DeviceFix { lat: number; lng: number; ts: number; heading?: number | null }
 
+// ════════════════════════════════════════════════════════════════════════════
+//  LOCATION-SOURCE DECISION — the single place that decides whether a unit's
+//  position comes from the SERVER feed (TMS or the dispatch SIMULATOR overlay) or
+//  the tablet's own hardware GPS. Pure + unit-tested so the rule can't silently
+//  regress (the "pit dead-zone" sim leak, where online=false used to switch a
+//  SIMULATED truck onto the tablet's GPS — see dispatchEngine.test.ts).
+//
+//  Rule:
+//    * SIM unit  → ALWAYS the server position (the simulation feed is the single
+//      source of truth). NEVER the tablet GPS, even when offline. If there is no
+//      server fix yet, there is simply no position (we do not invent one).
+//    * REAL unit → unchanged legacy behaviour: offline + a device fix → tablet
+//      GPS; otherwise the server position.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** A position fix from the server feed (TMS or the simulator overlay). */
+export interface ServerFix { lat: number; lng: number; course?: number | null }
+
+export type PositionSource = 'tablet' | 'equipment' | 'last' | null
+
+/**
+ * Decide whether the offline cycle engine may consume the tablet's device GPS.
+ * For a SIM unit this is ALWAYS false — the simulator feed drives it. For a real
+ * unit it is true only when offline and a device fix exists (the legacy rule).
+ */
+export function shouldUseDeviceFix(
+  isSim: boolean, online: boolean, hasDeviceFix: boolean,
+): boolean {
+  if (isSim) return false
+  return !online && hasDeviceFix
+}
+
+/**
+ * Pick the truck's map position from the available sources, honouring the sim
+ * rule. `serverFix` is the live server position (resolve-unit `tel`), `lastFix`
+ * the last server-known fallback (board row), `deviceFix` the tablet GPS.
+ * Returns the chosen point plus which source it came from (for the map badge).
+ */
+export function pickTruckPosition(args: {
+  isSim: boolean
+  online: boolean
+  deviceFix?: { lat: number; lng: number; heading?: number | null } | null
+  serverFix?: ServerFix | null
+  lastFix?: ServerFix | null
+}): { point: { lat: number; lng: number; course: number | null } | null; source: PositionSource } {
+  const { isSim, online, deviceFix, serverFix, lastFix } = args
+  // SIM units (and real units that should not use the tablet) take the server
+  // position: live server fix first, then the last server-known fix. NEVER GPS.
+  if (shouldUseDeviceFix(isSim, online, !!deviceFix) && deviceFix) {
+    return { point: { lat: deviceFix.lat, lng: deviceFix.lng, course: deviceFix.heading ?? null }, source: 'tablet' }
+  }
+  if (serverFix && serverFix.lat != null && serverFix.lng != null) {
+    return { point: { lat: serverFix.lat, lng: serverFix.lng, course: serverFix.course ?? null }, source: 'equipment' }
+  }
+  if (lastFix && lastFix.lat != null && lastFix.lng != null) {
+    return { point: { lat: lastFix.lat, lng: lastFix.lng, course: lastFix.course ?? null }, source: 'last' }
+  }
+  return { point: null, source: null }
+}
+
 // One transition the engine raises — maps to an offline-outbox action.
 export interface CycleEvent {
   kind: 'zone_event' | 'cycle_advance'

@@ -16,7 +16,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo, lazy, Suspense
 import { apiFetch } from '../services/api'
 import { submitDispatchAction, submitCycleEvent } from '../services/backgroundSync'
 import { DispatchOutbox } from '../services/dispatchOutbox'
-import { advanceOffline, buildOfflineProfile, haversineM, type CycleState, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
+import { advanceOffline, buildOfflineProfile, haversineM, pickTruckPosition, shouldUseDeviceFix, type CycleState, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
 import connectionManager from '../services/connectionManager'
 import type { ConnectionStatus } from '../services/connectionManager'
 import { useDispatchT } from '../services/dispatchI18n'
@@ -46,7 +46,7 @@ import prismLogo from '../assets/Logo1_splash.png'
 
 // ── types ────────────────────────────────────────────────────────────────
 type AllowedAction = { action: 'connect_truck' | 'connect_excavator'; unit_type: string; label: string }
-type ActiveAssignment = { unit_type: string; unit_no: string; unit_desc?: string; paired_at?: string; source?: string } | null
+type ActiveAssignment = { unit_type: string; unit_no: string; unit_desc?: string; paired_at?: string; source?: string; sim?: boolean } | null
 type Profile = {
   employee_id: string
   name: string
@@ -65,6 +65,8 @@ type Profile = {
 type Tms = {
   entered_no: string; tms_plate?: string; asset_type?: string
   live?: boolean; lat?: number; lng?: number; state?: string; type_match?: boolean | null
+  // True when resolved to a dispatch-SIMULATOR overlay unit (DTSIM1/WSIM01).
+  sim?: boolean
 } | null
 type ConnectResult = {
   success: boolean; authorized?: boolean; message?: string; unit_type?: string
@@ -613,8 +615,13 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         setResult(data)
         // Tag GPS posts with this operator/unit so multiple cab tablets on one
         // shared login account each keep their own position on the map.
+        // EXCEPT for a SIMULATOR unit (DTSIM1/WSIM01): its position is the
+        // simulation feed, so the tablet GPS must NEVER be posted tagged to it
+        // (one-way: backend -> cab). Personal safety location keeps streaming
+        // untagged. The scope-sync effect below re-asserts this for reopens too.
         void import('../services/locationShare')
-          .then((m) => m.setConnectedScope({ employeeId: profile.employee_id, unitNo: u }))
+          .then((m) => m.setConnectedScope(
+            data.tms?.sim ? null : { employeeId: profile.employee_id, unitNo: u }))
           .catch(() => { /* location share unavailable */ })
         // Keep the "Connecting…" splash up briefly so it crossfades into the
         // operator window instead of flashing; the window mounts on `result`.
@@ -666,6 +673,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         unit_no: result.tms?.entered_no || connectedUnit,
         unit_type: result.unit_type || 'dump_truck',
         warnings: result.warnings || [],
+        sim: !!result.tms?.sim,
       }
     }
     if (profile?.active_assignment) {
@@ -673,6 +681,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
         unit_no: profile.active_assignment.unit_no,
         unit_type: profile.active_assignment.unit_type,
         warnings: [] as string[],
+        sim: !!profile.active_assignment.sim,
       }
     }
     return null
@@ -694,10 +703,15 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
   useEffect(() => {
     const emp = profile?.employee_id
     const unit = connection?.unit_no
+    // A SIMULATOR unit's position is the simulation feed — NEVER tag the tablet
+    // GPS with its unit_no (would leak tablet GPS onto the sim unit via the OUI
+    // overlay). Real units keep per-tablet scoping. Personal safety location is
+    // unaffected (it streams untagged regardless).
+    const tagSim = !!connection?.sim
     void import('../services/locationShare')
-      .then((m) => m.setConnectedScope(emp && unit ? { employeeId: emp, unitNo: unit } : null))
+      .then((m) => m.setConnectedScope(emp && unit && !tagSim ? { employeeId: emp, unitNo: unit } : null))
       .catch(() => { /* noop */ })
-  }, [profile?.employee_id, connection?.unit_no])
+  }, [profile?.employee_id, connection?.unit_no, connection?.sim])
 
   // ── connected: full-screen operator window ──
   if (profile && connection) {
@@ -1124,6 +1138,10 @@ type OpTruck = {
   lat?: number | null; lng?: number | null
   reporting?: boolean; departed?: boolean; last_zone?: string | null; zone_changed?: string | null
   driver_trips_today?: number | null
+  // True when this truck is a dispatch-SIMULATOR unit (DTSIM1): its position comes
+  // from the server simulation feed, never the tablet's GPS. See dispatch_service
+  // build_board / resolve_unit `sim`.
+  sim?: boolean
 }
 type OpExcavator = {
   excavator_no?: string; plan_id?: number; shift?: string; plan_date?: string | null
@@ -1148,7 +1166,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   const [loadingLoc, setLoadingLoc] = useState<string | null>(null)
   const [dumpLoc, setDumpLoc] = useState<string | null>(null)
   const [geo, setGeo] = useState<{ excLat?: number | null; excLng?: number | null; loadLat?: number | null; loadLng?: number | null; dumpLat?: number | null; dumpLng?: number | null; loadingZoneM?: number; waitingZoneM?: number; discoveryZoneM?: number; dumpZoneM?: number }>({})
-  const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number } | null>(null)
+  const [tel, setTel] = useState<{ lat?: number; lng?: number; speed?: number; course?: number; sim?: boolean } | null>(null)
   const [roads, setRoads] = useState<GeoJSON.FeatureCollection | null>(null)
   const [routePts, setRoutePts] = useState<[number, number][] | null>(null)
   const [routeSegments, setRouteSegments] = useState<{ lane: string; coordinates: [number, number][] }[] | null>(null)
@@ -1216,8 +1234,17 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   // cached geo), derive forward-only cycle transitions locally and enqueue them
   // to the outbox. The manual action button always overrides; while ONLINE this
   // is dormant (the server operator-view tick is authoritative).
+  // SIM unit? Its position is the server simulation feed — NEVER the tablet GPS.
+  // Sourced from the board row (truck.sim) or the live resolver (tel.sim) so the
+  // flag is set the moment either feed identifies the unit as synthetic.
+  const isSim = !!(truck?.sim || tel?.sim)
+
   useEffect(() => {
-    if (online || !deviceFix) { setEngineActive(false); return }
+    // A SIM unit must NEVER run the device-GPS offline engine (the simulator feed
+    // is authoritative even with no signal — the pit dead-zone leak). Real units
+    // keep the legacy offline behaviour.
+    if (!shouldUseDeviceFix(isSim, online, !!deviceFix)) { setEngineActive(false); return }
+    if (!deviceFix) { setEngineActive(false); return }
     const cur = stateRef.current as CycleState | undefined
     const g = geoRef.current
     if (!cur) return
@@ -1243,7 +1270,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
       }).catch(() => { /* queued for replay */ })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [online, deviceFix])
+  }, [online, deviceFix, isSim])
 
   useEffect(() => {
     let alive = true
@@ -1313,7 +1340,7 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
         const d = await r.json()
         if (!alive) return
         const t = d?.tms
-        if (t && t.lat != null && t.lng != null) setTel({ lat: t.lat, lng: t.lng, speed: t.speed, course: t.course })
+        if (t && t.lat != null && t.lng != null) setTel({ lat: t.lat, lng: t.lng, speed: t.speed, course: t.course, sim: !!t.sim })
       } catch { /* offline */ }
     }
     pull()
@@ -1450,21 +1477,23 @@ function TruckDriverWindow({ employeeId, truckNo, viewMode, setViewMode }:
   // keep working with no signal); ONLINE → the server TMS resolver (carries
   // speed/course and avoids draining only-this-device battery); finally the
   // last server-known position.
-  const truckPt = (!online && deviceFix)
-    ? { lat: deviceFix.lat, lng: deviceFix.lng, course: deviceFix.heading ?? null }
-    : (tel?.lat != null && tel?.lng != null)
-    ? { lat: tel.lat, lng: tel.lng, course: tel.course }
-    : (truck && truck.lat != null && truck.lng != null ? { lat: truck.lat, lng: truck.lng, course: null } : null)
+  //
+  // SIM units are special: their position is the server simulation feed, so the
+  // decision NEVER falls back to the tablet GPS for them — even offline (the pit
+  // dead-zone leak). pickTruckPosition centralises the rule (unit-tested).
+  const _pos = pickTruckPosition({
+    isSim, online,
+    deviceFix,
+    serverFix: (tel?.lat != null && tel?.lng != null) ? { lat: tel.lat, lng: tel.lng, course: tel.course } : null,
+    lastFix: (truck && truck.lat != null && truck.lng != null) ? { lat: truck.lat, lng: truck.lng, course: null } : null,
+  })
+  const truckPt = _pos.point
   // Position-source for the small map badge (an ICON, not a whole sentence):
-  //  - 'tablet'    = this device's own GPS (offline local tracking)
-  //  - 'equipment' = the unit's onboard TMS/GPS via the server resolver
+  //  - 'tablet'    = this device's own GPS (offline local tracking; real units only)
+  //  - 'equipment' = the unit's onboard TMS/GPS — or the SIMULATOR feed — via the server
   //  - 'last'      = stale last-server-known fix (no live source right now)
   //  - null        = no position at all
-  const gpsSource: 'tablet' | 'equipment' | 'last' | null =
-    (!online && deviceFix) ? 'tablet'
-    : (tel?.lat != null && tel?.lng != null) ? 'equipment'
-    : (truck && truck.lat != null && truck.lng != null) ? 'last'
-    : null
+  const gpsSource: 'tablet' | 'equipment' | 'last' | null = _pos.source
   const speedKph = tel?.speed != null ? Math.max(0, Math.round(tel.speed)) : null
   const nextLocName = isFull ? (dumpLoc || dt('dump_loc')) : (loadingLoc || excavatorNo || dt('shovel'))
 

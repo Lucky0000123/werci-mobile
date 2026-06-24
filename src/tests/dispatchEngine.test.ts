@@ -4,7 +4,7 @@
 // No DOM / network — these are verbatim ports of dispatch_service.py.
 
 import { describe, expect, it } from 'vitest'
-import { haversineM, zoneFor, advanceOffline, cycleRank, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
+import { haversineM, zoneFor, advanceOffline, cycleRank, pickTruckPosition, shouldUseDeviceFix, type CycleGeo, type DeviceFix } from '../services/dispatchEngine'
 
 // A loading site: excavator at (0,0), dump 1km north-ish. Rings 10/20/100, dump 50.
 const GEO: CycleGeo = {
@@ -112,5 +112,91 @@ describe('advanceOffline — manual-only legs and safety', () => {
   it('no geo anchor → unknown distance → no transition', () => {
     const res = advanceOffline('emptyTravel2', fixNorthMeters(5), { loadingZoneM: 10, waitingZoneM: 20, discoveryZoneM: 100 }, CTX)
     expect(res.events).toHaveLength(0)
+  })
+})
+
+
+// ════════════════════════════════════════════════════════════════════════════
+//  LOCATION-SOURCE DECISION — the dispatch-simulator position leak guard.
+//
+//  Background: a SIMULATOR unit (DTSIM1/WSIM01) gets its position from the server
+//  simulation feed. The in-cab APK must NEVER fall back to the tablet's own GPS
+//  for a sim unit, and must NEVER drive the offline cycle engine from tablet GPS
+//  for one. The classic regression is the PIT DEAD-ZONE: the cab loses signal
+//  (online=false) and the truck silently snaps onto the tablet's hardware GPS.
+//  These tests pin shouldUseDeviceFix + pickTruckPosition so that can't recur.
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('shouldUseDeviceFix — sim never consumes tablet GPS', () => {
+  it('real unit, offline, has device fix → uses device GPS (legacy behaviour kept)', () => {
+    expect(shouldUseDeviceFix(false, false, true)).toBe(true)
+  })
+  it('real unit, online → server position (no device GPS)', () => {
+    expect(shouldUseDeviceFix(false, true, true)).toBe(false)
+  })
+  it('real unit, offline, NO device fix → cannot use device GPS', () => {
+    expect(shouldUseDeviceFix(false, false, false)).toBe(false)
+  })
+  it('SIM unit, online → never device GPS', () => {
+    expect(shouldUseDeviceFix(true, true, true)).toBe(false)
+  })
+  it('SIM unit, OFFLINE, has device fix → STILL never device GPS (pit dead-zone)', () => {
+    // THE bug: offline used to flip a sim unit onto the tablet GPS. It must not.
+    expect(shouldUseDeviceFix(true, false, true)).toBe(false)
+  })
+})
+
+describe('pickTruckPosition — source selection by sim flag', () => {
+  const deviceFix = { lat: 1.111, lng: 2.222, heading: 90 }      // tablet hardware GPS
+  const serverFix = { lat: -0.6157, lng: 127.9247, course: 45 }  // simulation/TMS feed
+  const lastFix = { lat: -0.6000, lng: 127.9000, course: null }  // last server-known
+
+  it('REAL unit offline with a device fix → tablet GPS', () => {
+    const r = pickTruckPosition({ isSim: false, online: false, deviceFix, serverFix, lastFix })
+    expect(r.source).toBe('tablet')
+    expect(r.point).toEqual({ lat: deviceFix.lat, lng: deviceFix.lng, course: 90 })
+  })
+
+  it('REAL unit online → server (equipment) position', () => {
+    const r = pickTruckPosition({ isSim: false, online: true, deviceFix, serverFix, lastFix })
+    expect(r.source).toBe('equipment')
+    expect(r.point).toEqual({ lat: serverFix.lat, lng: serverFix.lng, course: 45 })
+  })
+
+  // ── THE PIT DEAD-ZONE SCENARIO (Leak 1): online=false AND sim===true ─────────
+  // This is the exact production failure being fixed. It is asserted standalone,
+  // not implied by the online path: a SIM truck that loses signal must keep the
+  // SERVER simulation position for BOTH the map marker AND advanceOffline(), and
+  // must NOT consume the tablet's device GPS even though a fresh fix exists.
+  it('SIM unit OFFLINE with a device fix present → uses SERVER sim position for the marker, NOT the tablet GPS', () => {
+    const r = pickTruckPosition({ isSim: true, online: false, deviceFix, serverFix, lastFix })
+    // marker comes from the simulation feed...
+    expect(r.source).toBe('equipment')
+    expect(r.point).toEqual({ lat: serverFix.lat, lng: serverFix.lng, course: 45 })
+    // ...and is explicitly NOT the tablet GPS, even though deviceFix is available.
+    expect(r.source).not.toBe('tablet')
+    expect(r.point).not.toEqual({ lat: deviceFix.lat, lng: deviceFix.lng, course: 90 })
+    // and the offline cycle engine is forbidden from consuming the device fix.
+    expect(shouldUseDeviceFix(true, false, true)).toBe(false)
+  })
+
+  it('SIM unit OFFLINE with NO live server fix → falls back to last server-known (still never tablet GPS)', () => {
+    const r = pickTruckPosition({ isSim: true, online: false, deviceFix, serverFix: null, lastFix })
+    expect(r.source).toBe('last')
+    expect(r.point).toEqual({ lat: lastFix.lat, lng: lastFix.lng, course: null })
+    expect(r.source).not.toBe('tablet')
+  })
+
+  it('SIM unit OFFLINE with no server position at all → no position (never invents tablet GPS)', () => {
+    const r = pickTruckPosition({ isSim: true, online: false, deviceFix, serverFix: null, lastFix: null })
+    expect(r.point).toBeNull()
+    expect(r.source).toBeNull()
+  })
+
+  it('REAL unit offline with NO device fix → server, then last fallback', () => {
+    const r1 = pickTruckPosition({ isSim: false, online: false, deviceFix: null, serverFix, lastFix })
+    expect(r1.source).toBe('equipment')
+    const r2 = pickTruckPosition({ isSim: false, online: false, deviceFix: null, serverFix: null, lastFix })
+    expect(r2.source).toBe('last')
   })
 })
