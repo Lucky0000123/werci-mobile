@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import PersonDeviationHistory from '../features/deviation/PersonDeviationHistory'
 import PairVehicleModal from '../components/PairVehicleModal'
@@ -314,8 +314,6 @@ export default function PersonDetailPage() {
     cardData?.kimper?.kimper_expired_date ||
     cardData?.kimper?.mcu_expire_date
   )
-  const autoOpenedPairing = useRef(false)
-
   const loadCurrentPairing = async (): Promise<{ vehicle_no: string; paired_at?: string } | null> => {
     if (!personEmployeeId) return null
     try {
@@ -329,21 +327,14 @@ export default function PersonDetailPage() {
     }
   }
 
-  // Fetch the person's active pairing; after a QR scan of a KIMPER holder
-  // who is not yet paired, auto-open the pairing flow (the user's requested
-  // gate: scan + has KIMPER → ask which vehicle).
+  // Fetch the person's active pairing so the "Currently paired" banner can show.
+  // We do NOT auto-open the pairing popup anymore — pairing is a deliberate action
+  // via the "Assign Vehicle for Today" button, not an automatic prompt.
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      const pairing = await loadCurrentPairing()
+      await loadCurrentPairing()
       if (cancelled) return
-      // Only auto-open for vehicle operators (KIMPER holders who also have
-      // authorized units listed). Safety-card holders without units are not drivers.
-      const isVehicleOperator = Boolean(authorizedUnitsList && authorizedUnitsList.length > 0)
-      if (fromScan && personHasKimper && isVehicleOperator && !pairing && !autoOpenedPairing.current) {
-        autoOpenedPairing.current = true
-        setShowPairModal(true)
-      }
     }
     if (personHasKimper && personEmployeeId) void run()
     return () => { cancelled = true }

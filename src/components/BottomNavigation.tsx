@@ -33,15 +33,6 @@ const HistoryIcon = ({ active }: IconProps) => (
   </svg>
 )
 
-const DispatchIcon = ({ active }: IconProps) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path d="M3 7.5H13V16H3V7.5Z" stroke={iconColor(active)} strokeWidth="2" strokeLinejoin="round" />
-    <path d="M13 10.5H17.5L20.5 13.5V16H13V10.5Z" stroke={iconColor(active)} strokeWidth="2" strokeLinejoin="round" />
-    <circle cx="6.5" cy="17.5" r="1.8" stroke={iconColor(active)} strokeWidth="2" />
-    <circle cx="16.5" cy="17.5" r="1.8" stroke={iconColor(active)} strokeWidth="2" />
-  </svg>
-)
-
 const SettingsIcon = ({ active }: IconProps) => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <circle cx="12" cy="12" r="3.25" stroke={iconColor(active)} strokeWidth="2" />
@@ -60,9 +51,9 @@ export default function BottomNavigation() {
   const { t } = useI18n()
 
   // Employee lookup lives on the dashboard (Home) now — no separate tab.
+  // Dispatch is reached from the pre-login mode picker (FMS), not the bottom nav.
   const navItems: NavItem[] = [
     { path: '/home', activePaths: ['/home', '/'], label: t('home'), icon: HomeIcon },
-    { path: '/dispatch', activePaths: ['/dispatch'], label: 'Dispatch', icon: DispatchIcon },
     { path: '/history', activePaths: ['/history'], label: t('history'), icon: HistoryIcon },
     { path: '/settings', activePaths: ['/settings'], label: t('settings'), icon: SettingsIcon }
   ]
@@ -85,7 +76,7 @@ export default function BottomNavigation() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           alignItems: 'stretch',
           gap: '6px',
           maxWidth: '720px',

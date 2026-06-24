@@ -789,7 +789,6 @@ function AppContent() {
             <Route path="/employee-detail" element={<EmployeeDetailPage />} />
             <Route path="/person-detail" element={<PersonDetailPage />} />
             <Route path="/history" element={<HistoryPage onShowToast={addToast} />} />
-            <Route path="/dispatch" element={<DispatchPage onExit={handleLogout} />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
             )}

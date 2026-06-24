@@ -7,6 +7,24 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.55.0 — Post-login UX cleanup. (1) Removed the "Dispatch" tab from the
+ *          bottom navigation — dispatch is reached from the pre-login mode
+ *          picker (FMS), not after a normal employee login, so the user flow no
+ *          longer routes to /dispatch. (2) The driver↔vehicle pairing popup
+ *          ("This is the driver / Assign Vehicle") no longer auto-opens when a
+ *          KIMPER-holding driver's profile is opened; pairing is now a deliberate
+ *          action via the "Assign Vehicle for Today" button. The "Currently
+ *          paired" banner still loads as before.
+ * 2.54.0 — Dispatch-simulator location fix (in-cab). A SIMULATOR unit
+ *          (DTSIM1 truck / WSIM01 excavator) now keeps the server simulation
+ *          position on the cab map and in the offline cycle engine — it NEVER
+ *          falls back to the tablet's own GPS, even with no signal (the pit
+ *          dead-zone leak). The backend now tags sim units with `sim` on
+ *          resolve-unit / board so the cab can tell synthetic units apart; the
+ *          cab also stops posting tablet GPS tagged to a sim unit_no (one-way:
+ *          backend → cab). Real units are unchanged. New pure helpers
+ *          (pickTruckPosition / shouldUseDeviceFix) centralise the source
+ *          decision, guarded by a standalone pit-dead-zone unit test.
  * 2.53.0 — Digital Cab Call (in-cab). The old in-cab radio button is replaced
  *          by ONE smart floating CALL button (bottom-right, 96px, glove-size):
  *          a SINGLE TAP opens a role picker (Dispatcher / Maintenance / Safety,
@@ -466,4 +484,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.53.0'
+export const APP_VERSION = '2.55.0'
