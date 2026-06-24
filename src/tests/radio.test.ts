@@ -14,6 +14,7 @@ vi.mock('../services/api', () => ({ apiFetch: (...a: any[]) => apiFetchMock(...a
 import {
   RadioController,
   StubVoiceTransport,
+  MumbleWebTransport,
   pickChannelForStatus,
   EMERGENCY_HOLD_MS,
   type VoiceTransport,
@@ -407,6 +408,65 @@ describe('RadioController emergency (panic) mode', () => {
     expect(c.getChannel()).toBe('site_emergency')
     await c.stopEmergency()
     expect(c.getChannel()).toBe('maintenance_workshop')  // the deferred status now applies
+  })
+})
+
+// --- MumbleWebTransport (Option A bridge) ----------------------------------
+// The real transport mirrors the web's window.PrismMumble factory. With no
+// ws_url OR no vendored client it must degrade byte-for-byte like the stub
+// (connect -> false, no throw). With both present it drives the session.
+describe('MumbleWebTransport', () => {
+  const baseCfg: RadioConfig = {
+    enabled: true, mumble_host: 'h', mumble_port: 64738, ws_url: '',
+    opus_bitrate: 24000, speak_heartbeat_ms: 50, default_channel: 'dispatch',
+  } as RadioConfig
+
+  afterEach(() => { delete (window as any).PrismMumble })
+
+  it('degrades to false when ws_url is empty (clean voice-offline)', async () => {
+    const t = new MumbleWebTransport()
+    const ok = await t.connect({ ...baseCfg, ws_url: '' }, 'TRUCK-1')
+    expect(ok).toBe(false)
+  })
+
+  it('degrades to false when ws_url is set but no vendored client exists', async () => {
+    delete (window as any).PrismMumble
+    const t = new MumbleWebTransport()
+    const ok = await t.connect({ ...baseCfg, ws_url: 'wss://proxy/ws' }, 'TRUCK-1')
+    expect(ok).toBe(false)
+  })
+
+  it('builds a session, opens muted, and forwards mute toggles when wired', async () => {
+    const setMuted = vi.fn()
+    const connect = vi.fn(() => Promise.resolve())
+    const made: any = { connect, setMuted, onReceiving: vi.fn(), disconnect: vi.fn() }
+    const factory = vi.fn(() => made)
+    ;(window as any).PrismMumble = factory
+
+    const t = new MumbleWebTransport()
+    const ok = await t.connect({ ...baseCfg, ws_url: 'wss://proxy/ws' }, 'TRUCK-1')
+    expect(ok).toBe(true)
+    // Factory got the proxy URL + identity + Opus bitrate.
+    expect(factory).toHaveBeenCalledWith(expect.objectContaining({
+      wsUrl: 'wss://proxy/ws', username: 'TRUCK-1', opusBitrate: 24000,
+    }))
+    expect(connect).toHaveBeenCalled()
+    // Default resting state is MUTED.
+    expect(setMuted).toHaveBeenLastCalledWith(true)
+    // Tap-to-talk opens the mic; muting closes it.
+    await t.startTransmit()
+    expect(setMuted).toHaveBeenLastCalledWith(false)
+    t.setMuted(true)
+    expect(setMuted).toHaveBeenLastCalledWith(true)
+  })
+
+  it('never throws if the session blows up (audio stays optional)', async () => {
+    ;(window as any).PrismMumble = () => { throw new Error('boom') }
+    const t = new MumbleWebTransport()
+    const ok = await t.connect({ ...baseCfg, ws_url: 'wss://proxy/ws' }, 'TRUCK-1')
+    expect(ok).toBe(false)
+    // setMuted on a dead session must be a silent no-op.
+    expect(() => t.setMuted(false)).not.toThrow()
   })
 })
 

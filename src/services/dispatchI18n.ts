@@ -208,6 +208,18 @@ const EN: Dict = {
   cabcall_broadcast_urgent: 'URGENT broadcast',
   cabcall_dismiss: 'Dismiss',
   cabcall_alert_sent: 'Alert sent to dispatch',
+  cabcall_call: 'Call',
+  cabcall_pick_role: 'Who do you want to call?',
+  cabcall_role_dispatcher: 'Dispatcher',
+  cabcall_role_maintenance: 'Maintenance',
+  cabcall_role_safety: 'Safety',
+  cabcall_no_monitor: 'No one is on that desk. Use the radio.',
+  cabcall_busy_notice: 'That desk is on another call. Use the radio.',
+  cabcall_talk: 'Talk',
+  cabcall_mute: 'Mute',
+  cabcall_muted: 'Muted',
+  cabcall_speaking: 'Speaking\u2026',
+  cabcall_hold_emergency: 'Hold 2s for emergency',
 }
 
 const ID: Dict = {
@@ -401,6 +413,18 @@ const ID: Dict = {
   cabcall_broadcast_urgent: 'Siaran PENTING',
   cabcall_dismiss: 'Tutup',
   cabcall_alert_sent: 'Peringatan terkirim ke dispatch',
+  cabcall_call: 'Panggil',
+  cabcall_pick_role: 'Siapa yang ingin Anda hubungi?',
+  cabcall_role_dispatcher: 'Dispatcher',
+  cabcall_role_maintenance: 'Perawatan',
+  cabcall_role_safety: 'Keselamatan',
+  cabcall_no_monitor: 'Tidak ada yang berjaga. Gunakan radio.',
+  cabcall_busy_notice: 'Meja itu sedang menelepon. Gunakan radio.',
+  cabcall_talk: 'Bicara',
+  cabcall_mute: 'Bisukan',
+  cabcall_muted: 'Dibisukan',
+  cabcall_speaking: 'Berbicara\u2026',
+  cabcall_hold_emergency: 'Tahan 2 dtk untuk darurat',
 }
 
 const ZH: Dict = {
@@ -594,6 +618,18 @@ const ZH: Dict = {
   cabcall_broadcast_urgent: '紧急广播',
   cabcall_dismiss: '关闭',
   cabcall_alert_sent: '警报已发送至调度',
+  cabcall_call: '呼叫',
+  cabcall_pick_role: '您要呼叫谁？',
+  cabcall_role_dispatcher: '调度',
+  cabcall_role_maintenance: '维修',
+  cabcall_role_safety: '安全',
+  cabcall_no_monitor: '该岗位无人值守，请使用对讲机。',
+  cabcall_busy_notice: '该岗位正在通话，请使用对讲机。',
+  cabcall_talk: '讲话',
+  cabcall_mute: '静音',
+  cabcall_muted: '已静音',
+  cabcall_speaking: '正在讲话\u2026',
+  cabcall_hold_emergency: '长按2秒呼救',
 }
 
 const DICTS: Record<Language, Dict> = { en: EN, id: ID, zh: ZH, es: {} }

@@ -123,6 +123,10 @@ export interface VoiceTransport {
   disconnect(): Promise<void>
   // Fires true when a remote station is heard, false when silence resumes.
   onReceiving(cb: (receiving: boolean) => void): void
+  // Optional explicit self-mute (used by the cab-call mute toggle: a connected
+  // 1:1 call opens default-MUTED and the operator taps to talk). Optional so the
+  // stub + any future transport need not implement it.
+  setMuted?(muted: boolean): void
 }
 
 // A no-audio transport: lets the full PTT UX, state machine, speaking reports
@@ -140,6 +144,7 @@ export class StubVoiceTransport implements VoiceTransport {
   async startTransmit(): Promise<void> {}
   async stopTransmit(): Promise<void> {}
   async disconnect(): Promise<void> {}
+  setMuted(): void {}
   onReceiving(cb: (r: boolean) => void): void {
     this.receivingCb = cb
   }
@@ -147,6 +152,104 @@ export class StubVoiceTransport implements VoiceTransport {
   _emitReceiving(r: boolean): void {
     this.receivingCb?.(r)
   }
+}
+
+// ---------------------------------------------------------------------------
+// MumbleWebTransport -- the REAL audio engine for both the radio PTT and the
+// cab-call 1:1 line.
+//
+// Browsers / the Android WebView cannot speak the native Mumble TCP protocol, so
+// voice rides the mumble-web-proxy (WebSocket <-> Murmur). The vendored
+// mumble-web client is injected at `window.PrismMumble` when the proxy + bundle
+// are deployed; this transport adapts that session to the VoiceTransport surface
+// the RadioController + CabCallController already drive. It is the SAME engine
+// for the radio talk groups and the leased cab-call slot (no second audio path).
+//
+// Clean degrade: with no `ws_url` (MUMBLE_WS_URL unset) OR no vendored client,
+// connect() returns false and the controller runs client-reported only -- byte
+// for byte the same behaviour as the StubVoiceTransport, so an undeployed proxy
+// changes nothing. This mirrors the web RadioVoice module in radio_channels.html.
+// ---------------------------------------------------------------------------
+interface PrismMumbleSession {
+  connect?: () => Promise<void> | void
+  disconnect?: () => void
+  setMuted?: (muted: boolean) => void
+  selectChannel?: (channel: string) => void
+  onReceiving?: (cb: (receiving: boolean) => void) => void
+  connected?: boolean
+}
+type PrismMumbleFactory = (opts: {
+  wsUrl: string
+  channel?: string
+  username?: string
+  token?: string | null
+  password?: string | null
+  opusBitrate?: number
+}) => PrismMumbleSession
+declare global {
+  // eslint-disable-next-line no-var
+  interface Window { PrismMumble?: PrismMumbleFactory }
+}
+
+export class MumbleWebTransport implements VoiceTransport {
+  readonly name = 'mumble-web'
+  private session: PrismMumbleSession | null = null
+  private cfg: RadioConfig | null = null
+  private username = ''
+  private channel: string | null = null
+  private muted = true
+  private receivingCb: ((r: boolean) => void) | null = null
+
+  private factory(): PrismMumbleFactory | null {
+    const f = typeof window !== 'undefined' ? window.PrismMumble : undefined
+    return typeof f === 'function' ? f : null
+  }
+
+  async connect(cfg: RadioConfig, username: string): Promise<boolean> {
+    this.cfg = cfg
+    this.username = username
+    // No proxy URL OR no vendored client -> audio unavailable; the controller
+    // runs client-reported only (identical clean degrade to the stub).
+    if (!cfg.ws_url) return false
+    const make = this.factory()
+    if (!make) return false
+    try {
+      this.session = make({
+        wsUrl: cfg.ws_url, username,
+        channel: this.channel || cfg.default_channel,
+        opusBitrate: cfg.opus_bitrate,
+      })
+      this.session.onReceiving?.((r) => this.receivingCb?.(r))
+      await Promise.resolve(this.session.connect?.())
+      this.session.setMuted?.(this.muted)
+      return true
+    } catch {
+      this.session = null
+      return false
+    }
+  }
+
+  async selectChannel(channelName: string): Promise<void> {
+    this.channel = channelName
+    if (!this.session) return
+    try {
+      if (this.session.selectChannel) { this.session.selectChannel(channelName); return }
+      // No live channel-switch in the bundle -> reconnect onto the new channel.
+      this.session.disconnect?.()
+      this.session = null
+      if (this.cfg) await this.connect(this.cfg, this.username)
+    } catch { /* audio optional: the call still connects via signaling */ }
+  }
+
+  async startTransmit(): Promise<void> { this.muted = false; try { this.session?.setMuted?.(false) } catch { /* ignore */ } }
+  async stopTransmit(): Promise<void> { this.muted = true; try { this.session?.setMuted?.(true) } catch { /* ignore */ } }
+  setMuted(muted: boolean): void { this.muted = muted; try { this.session?.setMuted?.(muted) } catch { /* ignore */ } }
+
+  async disconnect(): Promise<void> {
+    try { this.session?.disconnect?.() } catch { /* ignore */ }
+    this.session = null
+  }
+  onReceiving(cb: (r: boolean) => void): void { this.receivingCb = cb }
 }
 
 type StateListener = (s: RadioState) => void
@@ -182,7 +285,10 @@ export class RadioController {
   private emergencyTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(transport?: VoiceTransport) {
-    this.transport = transport || new StubVoiceTransport()
+    // Default to the real mumble-web engine. It degrades byte-for-byte like the
+    // stub when no proxy URL is configured or the vendored client is absent, so
+    // making it the default cannot regress an undeployed environment.
+    this.transport = transport || new MumbleWebTransport()
     this.transport.onReceiving((r) => {
       this.receiving = r
       // Surface receiving without overriding an active transmit.
@@ -268,6 +374,14 @@ export class RadioController {
     this.channel = name
     try { await this.transport.selectChannel(name) } catch { /* audio optional */ }
     this.emit()
+  }
+
+  // Explicit self-mute for the cab-call mute toggle. A connected 1:1 call opens
+  // MUTED (the operator taps to talk, per the PTT = tap-toggle decision); this
+  // forwards the request to the audio engine. Best-effort: no-op if the transport
+  // does not implement it (e.g. an audio-less degrade).
+  setMuted(muted: boolean): void {
+    try { this.transport.setMuted?.(muted) } catch { /* audio optional */ }
   }
 
   // -- PTT ----------------------------------------------------------------

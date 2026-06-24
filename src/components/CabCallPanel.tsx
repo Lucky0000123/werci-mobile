@@ -1,16 +1,16 @@
 // CabCallPanel -- the in-cab PRISM Cab Call surface (the "intercom phone").
 //
-// Mounted alongside AdvancedRadioPTT on the connected operator window. It is the
-// cab's ENTIRE cab-call surface and owns the CabCallController lifecycle:
+// Mounted alongside CabCallButton on the connected operator window. It is the
+// cab's cab-call SURFACE layer and owns the CabCallController lifecycle:
 //
-//   * a floating glove-friendly button (left thumb-zone, mirrored from the radio
-//     PTT on the right) -> single tap opens the quick-actions sheet:
-//        - Call Dispatch (1:1 private line)
-//        - Report breakdown / Request fuel / No assignment (status alerts)
 //   * a full-screen BLUE incoming-call ring (Answer / Decline) when the dispatcher
-//     calls this cab, and an "on call / calling" state with End,
+//     calls this cab, and an "on call / calling" state with a tap-to-talk toggle
+//     (the call opens MUTED) + End,
 //   * an AMBER broadcast banner stack at the top for dispatcher -> fleet messages
 //     (tap Dismiss to acknowledge).
+//
+// The actual CALL trigger (single-tap role picker + long-press emergency) lives in
+// the sibling CabCallButton; this panel renders only the in-call + broadcast UI.
 //
 // Distinct from the radio (📻 amber PA) and the emergency path (🚨 red siren):
 // cab call is BLUE (calls) + AMBER (broadcasts). MEDICAL_EMERGENCY is intentionally
@@ -35,12 +35,10 @@ const D = {
   bg: '#0b0f17', panel: '#141414', panel2: '#1c1c1c', line2: '#3a3a3a',
   ink: '#ffffff', sub: '#9ca3af', sub2: '#d6d6d6',
 }
-const BLUE = '#2563eb'      // 1:1 call ring (distinct from radio amber + emergency red)
 const BLUE_LT = '#38BDF8'
 const AMBER = '#f59e0b'     // broadcast banner
 const GREEN = '#22c55e'
 const RED = '#ef4444'
-const BUTTON_SIZE = 96
 
 export interface CabCallPanelProps {
   identity: CabIdentity
@@ -64,18 +62,19 @@ export default function CabCallPanel({ identity }: CabCallPanelProps) {
   const ctrl = getCabCallController()
   const [phase, setPhase] = useState<CabCallPhase>(ctrl.getPhase())
   const [broadcasts, setBroadcasts] = useState<CabBroadcast[]>(ctrl.getBroadcasts())
-  const [sheetOpen, setSheetOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [muted, setMuted] = useState(ctrl.isMuted())
   // Live call elapsed-time ticker.
   const [elapsed, setElapsed] = useState(0)
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── controller lifecycle: connect on mount, release on unmount ──
   useEffect(() => {
-    const off = ctrl.onPhase((p) => { setPhase(p); if (p !== 'connected') setSheetOpen(false) })
+    const off = ctrl.onPhase((p) => setPhase(p))
     const offB = ctrl.onBroadcasts((b) => setBroadcasts([...b]))
+    const offM = ctrl.onMute((m) => setMuted(m))
     void ctrl.connect(identity)
-    return () => { off(); offB(); ctrl.disconnect() }
+    return () => { off(); offB(); offM(); ctrl.disconnect() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -96,7 +95,6 @@ export default function CabCallPanel({ identity }: CabCallPanelProps) {
   const ringing = phase === 'ringing_in'
   const outgoing = phase === 'ringing_out'
   const connected = phase === 'connected'
-  const offline = phase === 'offline'
   const inCall = ringing || outgoing || connected || phase === 'connecting'
 
   const answer = useCallback(async () => {
@@ -112,13 +110,10 @@ export default function CabCallPanel({ identity }: CabCallPanelProps) {
     setBusy(true); try { await ctrl.end('NORMAL') } finally { setBusy(false) }
   }, [ctrl, busy])
 
-  const callDispatch = useCallback(async () => {
-    setSheetOpen(false)
-    await ctrl.callDispatcher('MANUAL')
-  }, [ctrl])
-  const raise = useCallback(async (type: 'BREAKDOWN' | 'FUEL_REQUIRED' | 'WAITING_NO_ASSIGNMENT') => {
-    setSheetOpen(false)
-    await ctrl.raiseStatusAlert(type)
+  // Tap-to-talk: flip the mic on the leased slot (and the dispatcher "speaking"
+  // indicator). The call opens MUTED; this is the operator's PTT toggle.
+  const toggleTalk = useCallback(() => {
+    ctrl.toggleMute()
   }, [ctrl])
 
   const mmss = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
@@ -204,6 +199,17 @@ export default function CabCallPanel({ identity }: CabCallPanelProps) {
                 <button onClick={answer} disabled={busy}
                         style={callBtn(GREEN)}>📞 {dt('cabcall_answer')}</button>
               </>
+            ) : connected ? (
+              <>
+                {/* Tap-to-talk: the call opens MUTED, the operator taps Talk to
+                    open the mic (PTT = tap-toggle, matching the radio decision). */}
+                <button onClick={toggleTalk} disabled={busy}
+                        style={callBtn(muted ? D.line2 : GREEN)}>
+                  {muted ? `🎙️ ${dt('cabcall_talk')}` : `● ${dt('cabcall_speaking')}`}
+                </button>
+                <button onClick={endCall} disabled={busy}
+                        style={callBtn(RED)}>✕ {dt('cabcall_end')}</button>
+              </>
             ) : (
               <button onClick={endCall} disabled={busy}
                       style={callBtn(RED)}>✕ {dt('cabcall_end')}</button>
@@ -212,71 +218,9 @@ export default function CabCallPanel({ identity }: CabCallPanelProps) {
         </div>
       )}
 
-      {/* ── floating cab-call button (left thumb-zone; radio PTT is on the right) ── */}
-      {!inCall && (
-        <div style={{ position: 'fixed', zIndex: 7400,
-                      left: 'calc(18px + env(safe-area-inset-left,0px))',
-                      bottom: 'calc(18px + env(safe-area-inset-bottom,0px))',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: '0.66rem', fontWeight: 800, letterSpacing: '0.06em',
-                         color: offline ? RED : BLUE_LT, background: 'rgba(11,15,23,0.75)',
-                         padding: '3px 9px', borderRadius: 999, textTransform: 'uppercase' }}>
-            {offline ? dt('cabcall_offline') : dt('cabcall')}
-          </span>
-          <button
-            aria-label={dt('cabcall')}
-            disabled={offline}
-            onClick={() => { if (!offline) setSheetOpen(true) }}
-            style={{ width: BUTTON_SIZE, height: BUTTON_SIZE, borderRadius: '50%',
-                     border: `4px solid ${offline ? RED : BLUE}`,
-                     background: offline ? 'rgba(239,68,68,0.10)' : 'rgba(37,99,235,0.16)', color: '#fff',
-                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                     cursor: offline ? 'default' : 'pointer', boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-                     opacity: offline ? 0.6 : 1 }}>
-            <PhoneIcon size={34} color={offline ? RED : BLUE_LT} />
-            <span style={{ fontSize: '0.6rem', fontWeight: 900, letterSpacing: '0.05em',
-                           color: offline ? RED : BLUE_LT }}>
-              {offline ? dt('cabcall_offline').split(' ')[0].toUpperCase() : 'CALL'}
-            </span>
-          </button>
-        </div>
-      )}
-
-      {/* ── quick-actions sheet (tap the button) ── */}
-      {sheetOpen && !inCall && (
-        <div onClick={() => setSheetOpen(false)}
-             style={{ position: 'fixed', inset: 0, zIndex: 7700, background: 'rgba(2,6,12,0.78)',
-                      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', backdropFilter: 'blur(2px)' }}>
-          <div onClick={(e) => e.stopPropagation()}
-               style={{ width: '100%', maxWidth: 560, background: D.panel, borderTopLeftRadius: 22,
-                        borderTopRightRadius: 22, border: `1px solid ${D.line2}`, borderBottom: 'none',
-                        padding: '18px 16px calc(18px + env(safe-area-inset-bottom,0px))',
-                        boxShadow: '0 -20px 60px rgba(0,0,0,0.6)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <span style={{ color: D.ink, fontWeight: 900, fontSize: '1.05rem' }}>{dt('cabcall')}</span>
-              <button onClick={() => setSheetOpen(false)}
-                      style={{ padding: '10px 16px', minHeight: 44, borderRadius: 10, color: D.sub2,
-                               background: 'transparent', border: `1px solid ${D.line2}`, fontWeight: 800, cursor: 'pointer' }}>
-                ✕
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button onClick={callDispatch} style={sheetBtn(BLUE)}>
-                <PhoneIcon size={26} color={BLUE_LT} /> {dt('cabcall_call_dispatch')}
-              </button>
-              <button onClick={() => void raise('BREAKDOWN')} style={sheetBtn(RED)}>
-                <span style={{ fontSize: '1.3rem' }} aria-hidden>🛠️</span> {dt('cabcall_breakdown')}
-              </button>
-              <button onClick={() => void raise('FUEL_REQUIRED')} style={sheetBtn(AMBER)}>
-                <span style={{ fontSize: '1.3rem' }} aria-hidden>⛽</span> {dt('cabcall_fuel')}
-              </button>
-              <button onClick={() => void raise('WAITING_NO_ASSIGNMENT')} style={sheetBtn(D.sub2)}>
-                <span style={{ fontSize: '1.3rem' }} aria-hidden>⏳</span> {dt('cabcall_no_assignment')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* The single floating CALL button (single-tap role picker + long-press
+          emergency) now lives in CabCallButton.tsx -- this panel only renders the
+          incoming-ring / connected-call surface and the broadcast banner stack. */}
     </>
   )
 }
@@ -287,13 +231,5 @@ function callBtn(color: string): React.CSSProperties {
     minWidth: 150, minHeight: 64, borderRadius: 16, border: 'none', background: color, color: '#fff',
     fontWeight: 900, fontSize: '1.05rem', cursor: 'pointer', letterSpacing: '0.02em',
     boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-  }
-}
-// Full-width sheet row (>=64px, glove-friendly).
-function sheetBtn(accent: string): React.CSSProperties {
-  return {
-    display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 64, padding: '0 16px',
-    borderRadius: 14, textAlign: 'left', cursor: 'pointer', color: '#fff', fontWeight: 800, fontSize: '1rem',
-    border: `2px solid ${accent}`, background: '#1c1c1c',
   }
 }

@@ -26,13 +26,14 @@ import { useI18n, type Language } from '../services/i18n-context'
 // Lazy-load it so the FMS sign-on, the employee card, and the excavator OUI (no
 // map at all) never pay the map-engine parse cost on a low-end cab tablet.
 const NavMap = lazy(() => import('../components/NavMap'))
-// AdvancedRadioPTT is the in-cab radio surface: a floating 96px PTT button
-// (tap = channel sheet, hold = push-to-talk, long-press = emergency) with smart
-// channel auto-switch. Lazy-loaded so the dispatch screen pulls in NO radio /
+// CabCallButton is the cab's SINGLE smart control button: a floating 96px button
+// (single-tap = role picker -> 1:1 cab call; hold 2s = EXISTING emergency path,
+// unchanged). It replaces the two old floating buttons (radio PTT + cab-call
+// button). Lazy-loaded so the dispatch screen pulls in NO radio /
 // audio code at module load so a voice failure can never affect the haul-cycle,
 // and low-end cab tablets pay nothing for it until connected. See
 // docs/prism_radio_phase1.md.
-const AdvancedRadioPTT = lazy(() => import('../components/AdvancedRadioPTT'))
+const CabCallButton = lazy(() => import('../components/CabCallButton'))
 // CabCallPanel is the in-cab PRISM Cab Call surface: a floating call button (left
 // thumb-zone), the blue incoming-call ring, and the amber dispatcher-broadcast
 // banner. Lazy-loaded for the same reason as the radio (no cab-call/SSE code at
@@ -734,7 +735,7 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
               <WarnIcons warnings={connection.warnings} />
             )}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              {/* The radio lives in the floating AdvancedRadioPTT button
+              {/* The radio/cab-call lives in the floating CabCallButton
                   (bottom thumb-zone), not the top bar -- see below. */}
               {/* Language switcher — must be reachable from EVERY in-cab screen
                   (excavator + truck OUI both render under this top bar). */}
@@ -793,14 +794,14 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
           )}
         </div>
 
-        {/* AdvancedRadioPTT -- the cab's entire radio surface: a floating 96px
-            PTT button (tap = channel sheet, hold = push-to-talk, 3s long-press =
-            emergency) with smart channel auto-switch. Always mounted on the
+        {/* CabCallButton -- the cab's SINGLE smart control (bottom-right 96px):
+            single-tap = role picker -> 1:1 cab call; hold 2s = EXISTING emergency
+            path (unchanged). Always mounted on the
             connected operator window (truck AND excavator); lazy + Suspense
             fallback null so it never blocks the cab, and a voice/zone failure
             degrades to "Radio offline" without ever touching the haul-cycle. */}
         <Suspense fallback={null}>
-          <AdvancedRadioPTT
+          <CabCallButton
             identity={{ employeeId: profile.employee_id, unitNo: connection.unit_no, operatorName: profile.name }}
           />
         </Suspense>

@@ -14,6 +14,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 const apiFetchMock = vi.fn()
 const selectChannelMock = vi.fn(() => Promise.resolve())
 const getChannelMock = vi.fn(() => 'hauling')
+const setMutedMock = vi.fn()
 
 vi.mock('../services/api', () => ({
   apiFetch: (...a: any[]) => apiFetchMock(...a),
@@ -23,6 +24,7 @@ vi.mock('../services/radio', () => ({
   getRadioController: () => ({
     getChannel: () => getChannelMock(),
     selectChannel: (n: string) => selectChannelMock(n),
+    setMuted: (m: boolean) => setMutedMock(m),
   }),
 }))
 
@@ -61,8 +63,10 @@ function wireHealthy(overrides: Record<string, any> = {}) {
     if (path.startsWith('/api/broadcast/inbox')) return okJson({ success: true, inbox: overrides.inbox || [] })
     if (path === '/api/cab-call/active') return okJson({ success: true, calls: overrides.active || [] })
     if (path === '/api/cab-call/initiate') return okJson({ success: true, call: { call_id: 'call-out-1' } })
-    if (path.endsWith('/answer')) return okJson({ success: true, mumble_channel: 'cab-call-slot-03' })
+    if (path.endsWith('/answer')) return okJson({ success: true, mumble_channel: 'cab-call-slot-03',
+                                                  voice: { ws_url: '', channel: 'cab-call-slot-03', token: 'cab-call-slot-03' } })
     if (path.endsWith('/end')) return okJson({ success: true })
+    if (path.endsWith('/ptt')) return okJson({ success: true })
     if (path.endsWith('/acknowledge')) return okJson({ success: true })
     if (path === '/api/status-alert/raise') return okJson({ success: true, ...overrides.raise })
     return okJson({ success: true })
@@ -74,6 +78,7 @@ describe('CabCallController', () => {
     apiFetchMock.mockReset()
     selectChannelMock.mockClear()
     getChannelMock.mockClear()
+    setMutedMock.mockClear()
     FakeEventSource.instances = []
     ;(globalThis as any).EventSource = FakeEventSource as any
     __setCabCallController(null)
@@ -124,6 +129,47 @@ describe('CabCallController', () => {
     expect(c.getCall()?.callId).toBe('call-out-1')
   })
 
+  it('callRole sends target_role and rings out', async () => {
+    wireHealthy()
+    const c = new CabCallController()
+    await c.connect(IDENT)
+    const ok = await c.callRole('MAINTENANCE')
+    expect(ok).toBe(true)
+    expect(c.getPhase()).toBe('ringing_out')
+    // The initiate body must carry the chosen role for server-side routing.
+    const initiate = apiFetchMock.mock.calls.find((a: any[]) => a[0] === '/api/cab-call/initiate')
+    expect(initiate).toBeTruthy()
+    expect(JSON.parse(initiate![1].body).target_role).toBe('MAINTENANCE')
+  })
+
+  it('callDispatcher routes to the DISPATCHER role', async () => {
+    wireHealthy()
+    const c = new CabCallController()
+    await c.connect(IDENT)
+    await c.callDispatcher('MANUAL')
+    const initiate = apiFetchMock.mock.calls.find((a: any[]) => a[0] === '/api/cab-call/initiate')
+    expect(JSON.parse(initiate![1].body).target_role).toBe('DISPATCHER')
+  })
+
+  it('callRole emits a no_monitor notice and stays idle on 409', async () => {
+    wireHealthy()
+    const c = new CabCallController()
+    await c.connect(IDENT)
+    const notices: any[] = []
+    c.onNotice((n) => notices.push(n))
+    // The desk is unmanned -> the server 409s with no_monitor.
+    apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/cab-call/initiate')
+        return Promise.resolve({ ok: false, status: 409,
+          json: () => Promise.resolve({ success: false, error: 'no_monitor', message: 'No Safety available - use radio.' }) } as Response)
+      return okJson({ success: true })
+    })
+    const ok = await c.callRole('SAFETY')
+    expect(ok).toBe(false)
+    expect(c.getPhase()).toBe('idle')
+    expect(notices).toEqual([{ type: 'no_monitor', role: 'SAFETY', message: 'No Safety available - use radio.' }])
+  })
+
   it('dispatcher answering an outgoing call connects + joins the voice slot', async () => {
     wireHealthy()
     const c = new CabCallController()
@@ -137,6 +183,40 @@ describe('CabCallController', () => {
     // joinVoice() is fire-and-forget via a dynamic import; flush it then assert.
     await vi.advanceTimersByTimeAsync(0)
     expect(selectChannelMock).toHaveBeenCalledWith('cab-call-slot-05')
+    // The call opens MUTED (PTT = tap-to-talk).
+    expect(c.isMuted()).toBe(true)
+    expect(setMutedMock).toHaveBeenCalledWith(true)
+  })
+
+  it('toggleMute opens the mic + reports speaking, then closes it', async () => {
+    wireHealthy()
+    const c = new CabCallController()
+    await c.connect(IDENT)
+    await c.callDispatcher('MANUAL')
+    ;(c as any).handleEvent({ event: 'CAB_CALL_STATE_CHANGED', call_id: 'call-out-1',
+                              new_state: 'CONNECTED', mumble_channel: 'cab-call-slot-05' })
+    await vi.advanceTimersByTimeAsync(0)
+    setMutedMock.mockClear()
+    // Tap Talk -> unmute + PTT_STARTED report.
+    expect(c.toggleMute()).toBe(false)
+    expect(c.isMuted()).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(setMutedMock).toHaveBeenCalledWith(false)
+    const pttOn = apiFetchMock.mock.calls.find((a: any[]) =>
+      String(a[0]).endsWith('/ptt') && JSON.parse(a[1].body).speaking === true)
+    expect(pttOn).toBeTruthy()
+    // Tap again -> mute + stop speaking.
+    expect(c.toggleMute()).toBe(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(setMutedMock).toHaveBeenCalledWith(true)
+  })
+
+  it('toggleMute is a no-op when not connected', async () => {
+    wireHealthy()
+    const c = new CabCallController()
+    await c.connect(IDENT)
+    expect(c.toggleMute()).toBe(true)        // stays muted; nothing to talk on
+    expect(setMutedMock).not.toHaveBeenCalled()
   })
 
   // -- incoming call -------------------------------------------------------
