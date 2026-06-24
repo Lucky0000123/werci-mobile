@@ -7,6 +7,12 @@
  * Keep android/app/build.gradle in sync: versionName = this string,
  * versionCode = numeric (e.g. 2.3.0 → 230).
  *
+ * 2.55.1 — FMS sign-on: stop rejecting a long Employee ID while it's still
+ *          being typed. Employee IDs are ~10-digit numbers, so the debounced
+ *          /lookup no longer runs (and the preview no longer flashes "ID not
+ *          found / wrong number") until the typed numeric ID reaches a minimum
+ *          length; a short, incomplete ID now shows a calm "Keep typing your
+ *          full Employee ID…" hint instead of a red rejection.
  * 2.55.0 — Post-login UX cleanup. (1) Removed the "Dispatch" tab from the
  *          bottom navigation — dispatch is reached from the pre-login mode
  *          picker (FMS), not after a normal employee login, so the user flow no
@@ -484,4 +490,4 @@
  *          keep-out zones, muster roll-call (I'M SAFE / NEED HELP),
  *          user-group alert targeting, always-on tracking hardening.
  */
-export const APP_VERSION = '2.55.0'
+export const APP_VERSION = '2.55.1'

@@ -432,6 +432,16 @@ export default function DispatchPage({ onExit }: { onExit?: () => void } = {}) {
     if (profile) return                                  // already on Step 2
     const id = employeeId.trim()
     if (!id) { setIdPreview(null); setIdPreviewError(null); setIdPreviewLoading(false); return }
+    // Employee IDs are long numbers (~10 digits). While the operator is still
+    // typing a short value, NEVER show a "not found / wrong number" rejection —
+    // just a calm "keep typing" hint. We only attempt the lookup + surface a
+    // not-found error once the ID looks complete enough (MIN_ID_LEN digits).
+    const MIN_ID_LEN = 6
+    const isNumericId = /^\d+$/.test(id)
+    if (isNumericId && id.length < MIN_ID_LEN) {
+      setIdPreview(null); setIdPreviewError(null); setIdPreviewLoading(false)
+      return
+    }
     let alive = true
     setIdPreviewLoading(true); setIdPreviewError(null)
     const h = setTimeout(async () => {
@@ -2150,6 +2160,16 @@ function OperatorPreviewCard({ employeeId, preview, loading, offline, error, dt 
                     display: 'flex', alignItems: 'center', gap: 12, minHeight: 76 }}>
         <span style={{ fontSize: '1.4rem' }}>⚠</span>
         <span style={{ color: '#fca5a5', fontWeight: 700, fontSize: '1rem' }}>{error}</span>
+      </div>
+    )
+  }
+  // Still typing a short (incomplete) numeric ID — show a calm "keep typing"
+  // hint instead of a spinner/rejection. Mirrors the MIN_ID_LEN gate above.
+  if (!preview && !loading && /^\d+$/.test(typed) && typed.length < 6) {
+    return (
+      <div style={{ ...previewShell(F.line2), color: F.sub, fontSize: '1rem', fontWeight: 600,
+                    display: 'flex', alignItems: 'center', gap: 10, minHeight: 76 }}>
+        <span style={{ fontSize: '1.2rem', opacity: 0.7 }}>⌨️</span>{dt('keep_typing')}
       </div>
     )
   }
